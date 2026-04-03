@@ -106,6 +106,9 @@ func printTextReport(report Report) {
 	for _, finding := range report.Findings {
 		fmt.Printf("[%s] %s\n", strings.ToUpper(finding.Severity), finding.Title())
 		fmt.Printf("Path: %s\n", finding.Path)
+		if finding.Ecosystem != "" {
+			fmt.Printf("Ecosystem: %s\n", finding.Ecosystem)
+		}
 		if finding.Package != "" {
 			fmt.Printf("Package: %s@%s\n", finding.Package, finding.Version)
 		}

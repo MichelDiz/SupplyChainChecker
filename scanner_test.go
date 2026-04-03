@@ -76,6 +76,42 @@ packages:
 	assertHasFinding(t, report, "plain-crypto-js", "4.2.1", "lockfile")
 }
 
+func TestScanDetectsLiteLLMInPythonFilesAndInstalledMetadata(t *testing.T) {
+	root := t.TempDir()
+
+	writeFile(t, filepath.Join(root, "python-app", "requirements.txt"), `
+litellm==1.82.7
+requests==2.32.0
+`)
+
+	writeFile(t, filepath.Join(root, "python-app", "uv.lock"), `
+version = 1
+
+[[package]]
+name = "litellm"
+version = "1.82.8"
+
+[[package]]
+name = "httpx"
+version = "0.28.1"
+`)
+
+	writeFile(t, filepath.Join(root, "python-app", ".venv", "lib", "python3.12", "site-packages", "litellm-1.82.8.dist-info", "METADATA"), `
+Metadata-Version: 2.1
+Name: litellm
+Version: 1.82.8
+`)
+
+	report := Scan(Config{
+		Roots:      []string{root},
+		IncludeIOC: false,
+	})
+
+	assertHasFinding(t, report, "litellm", "1.82.7", "manifest-reference")
+	assertHasFinding(t, report, "litellm", "1.82.8", "lockfile")
+	assertHasFinding(t, report, "litellm", "1.82.8", "installed-package")
+}
+
 func TestContainsVersionToken(t *testing.T) {
 	tests := []struct {
 		spec    string
@@ -142,6 +178,25 @@ repo/private
 	}
 
 	assertHasFinding(t, report, "axios", "0.30.4", "lockfile")
+}
+
+func TestScanDetectsLiteLLMInPipfileLock(t *testing.T) {
+	root := t.TempDir()
+
+	writeFile(t, filepath.Join(root, "python-app", "Pipfile.lock"), `{
+  "default": {
+    "litellm": {
+      "version": "==1.82.8"
+    }
+  }
+}`)
+
+	report := Scan(Config{
+		Roots:      []string{root},
+		IncludeIOC: false,
+	})
+
+	assertHasFinding(t, report, "litellm", "1.82.8", "lockfile")
 }
 
 func TestNormalizeRootsReportsDefaultHomeUsage(t *testing.T) {

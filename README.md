@@ -1,19 +1,19 @@
 # Supply Chain Checker
 
-Go scanner to search for evidence of the Axios incident published on March 31, 2026.
+Go scanner for investigating known supply chain compromise versions across ecosystems.
 
 It checks:
 
-- `package.json` and related fields (`dependencies`, `devDependencies`, `overrides`, `resolutions`)
-- `package-lock.json` and `npm-shrinkwrap.json`
-- `yarn.lock`
-- `pnpm-lock.yaml`
-- `bun.lock` and `bun.lockb`
-- installed dependencies in `node_modules`
+- npm manifests and lockfiles: `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`
+- Python manifests and lockfiles: `requirements*.txt`, `constraints.txt`, `pyproject.toml`, `uv.lock`, `poetry.lock`, `Pipfile`, `Pipfile.lock`, `setup.py`, `setup.cfg`
+- installed Node dependencies in `node_modules`
+- installed Python distributions via `METADATA` and `PKG-INFO` inside virtualenvs and `site-packages`
 - Basic host IOCs published by researchers for macOS, Linux, and Windows
 
 Versions treated as compromised:
 
+- `litellm@1.82.7`
+- `litellm@1.82.8`
 - `axios@1.14.1`
 - `axios@0.30.4`
 - `plain-crypto-js@4.2.1`
@@ -103,5 +103,16 @@ Rules:
 ## Notes
 
 - A `package.json` with `^1.14.1` or `~1.14.1` is a sign of risk, but does not prove installation.
+- A Python manifest that references `litellm==1.82.7` or `litellm==1.82.8` is a sign of risk, but does not prove installation.
 - A lockfile or `node_modules` pointing to `1.14.1` or `0.30.4` is strong evidence of exposure.
+- A Python lockfile or installed package metadata pointing to LiteLLM `1.82.7` or `1.82.8` is strong evidence of exposure.
 - If a machine installed these versions within the attack timeframe of `2026-03-31`, treat the environment as potentially compromised and rotate secrets.
+
+## Extending
+
+New incidents live in `incidents.go`. To add another confirmed supply chain case, add one entry with:
+
+- `ecosystem`
+- `package`
+- compromised `versions`
+- a short `summary`

@@ -20,10 +20,6 @@ import (
 const defaultMaxReadBytes = 64 << 20
 
 var (
-	manifestVersionMatchers = map[string][]string{
-		"axios":           {"1.14.1", "0.30.4"},
-		"plain-crypto-js": {"4.2.1"},
-	}
 	defaultSkipDirs = map[string]struct{}{
 		".git":           {},
 		".hg":            {},
@@ -43,7 +39,7 @@ var (
 		".Trash":         {},
 		"Library/Caches": {},
 	}
-	interestingFiles = map[string]struct{}{
+	exactInterestingFiles = map[string]struct{}{
 		"package.json":        {},
 		"package-lock.json":   {},
 		"npm-shrinkwrap.json": {},
@@ -51,10 +47,21 @@ var (
 		"pnpm-lock.yaml":      {},
 		"bun.lock":            {},
 		"bun.lockb":           {},
+		"pyproject.toml":      {},
+		"uv.lock":             {},
+		"poetry.lock":         {},
+		"Pipfile":             {},
+		"Pipfile.lock":        {},
+		"setup.py":            {},
+		"setup.cfg":           {},
+		"constraints.txt":     {},
+		"METADATA":            {},
+		"PKG-INFO":            {},
 	}
 	pnpmLockPattern       = regexp.MustCompile(`(?m)^\s*\/?((?:@[^/\s:]+/)?[^@\s:()]+)@([0-9]+\.[0-9]+\.[0-9]+)(?:\(|:|$)`)
 	versionLinePattern    = regexp.MustCompile(`(?i)^\s*version[: ]+"?([0-9]+\.[0-9]+\.[0-9]+)"?\s*$`)
 	resolutionLinePattern = regexp.MustCompile(`(?i)^\s*resolution[: ]+"?([^"]+)"?\s*$`)
+	packageBlockPattern   = regexp.MustCompile(`^\[\[package\]\]$`)
 )
 
 type Config struct {
@@ -88,12 +95,13 @@ type Stats struct {
 }
 
 type Finding struct {
-	Severity string `json:"severity"`
-	Category string `json:"category"`
-	Package  string `json:"package,omitempty"`
-	Version  string `json:"version,omitempty"`
-	Path     string `json:"path"`
-	Details  string `json:"details"`
+	Severity  string `json:"severity"`
+	Category  string `json:"category"`
+	Ecosystem string `json:"ecosystem,omitempty"`
+	Package   string `json:"package,omitempty"`
+	Version   string `json:"version,omitempty"`
+	Path      string `json:"path"`
+	Details   string `json:"details"`
 }
 
 func (f Finding) Title() string {
@@ -212,6 +220,12 @@ func (s *scanner) finish() {
 	sort.Slice(s.report.Errors, func(i, j int) bool {
 		return s.report.Errors[i].Path < s.report.Errors[j].Path
 	})
+	if s.report.Findings == nil {
+		s.report.Findings = []Finding{}
+	}
+	if s.report.Errors == nil {
+		s.report.Errors = []ScanError{}
+	}
 }
 
 func normalizeRoots(input []string) ([]string, bool, error) {
@@ -292,7 +306,7 @@ func (s *scanner) scanDir(root, dir string, matcher ignoreMatcher) {
 			continue
 		}
 
-		if _, ok := interestingFiles[entry.Name()]; !ok {
+		if !isInterestingFile(entry.Name()) {
 			continue
 		}
 		s.report.Stats.Files++
@@ -314,7 +328,15 @@ func (s *scanner) shouldIgnorePath(root, fullPath, baseName string, matcher igno
 }
 
 func (s *scanner) scanFile(path string) {
-	switch filepath.Base(path) {
+	baseName := filepath.Base(path)
+	switch {
+	case strings.HasPrefix(baseName, "requirements") && strings.HasSuffix(baseName, ".txt"):
+		s.report.Stats.Manifests++
+		s.scanPythonManifestText(path, "requirements")
+		return
+	}
+
+	switch baseName {
 	case "package.json":
 		s.report.Stats.Manifests++
 		s.scanManifest(path)
@@ -330,6 +352,17 @@ func (s *scanner) scanFile(path string) {
 	case "bun.lock", "bun.lockb":
 		s.report.Stats.Lockfiles++
 		s.scanRawLockfile(path)
+	case "pyproject.toml", "Pipfile", "setup.py", "setup.cfg", "constraints.txt":
+		s.report.Stats.Manifests++
+		s.scanPythonManifestText(path, baseName)
+	case "uv.lock", "poetry.lock":
+		s.report.Stats.Lockfiles++
+		s.scanPythonPackageBlockLock(path, baseName)
+	case "Pipfile.lock":
+		s.report.Stats.Lockfiles++
+		s.scanPipfileLock(path)
+	case "METADATA", "PKG-INFO":
+		s.scanPythonInstalledMetadata(path)
 	}
 }
 
@@ -375,17 +408,22 @@ func (s *scanner) scanManifestSection(path, section string, raw any) {
 		if !ok {
 			continue
 		}
-		for _, version := range manifestVersionMatchers[dependencyName] {
+		incident, ok := incidentForPackage("npm", dependencyName)
+		if !ok {
+			continue
+		}
+		for _, version := range incident.Versions {
 			if !containsVersionToken(spec, version) {
 				continue
 			}
 			s.addFinding(Finding{
-				Severity: "warning",
-				Category: "manifest-reference",
-				Package:  dependencyName,
-				Version:  version,
-				Path:     path,
-				Details:  fmt.Sprintf("%s references %s with spec %q. This does not prove installation, but it could have resolved to the malicious version during the March 31, 2026 attack window.", section, dependencyName, spec),
+				Severity:  "warning",
+				Category:  "manifest-reference",
+				Ecosystem: "npm",
+				Package:   dependencyName,
+				Version:   version,
+				Path:      path,
+				Details:   fmt.Sprintf("%s references %s with spec %q. This does not prove installation, but it could have resolved to a known compromised version.", section, dependencyName, spec),
 			})
 		}
 	}
@@ -400,17 +438,22 @@ func (s *scanner) scanNestedDependencyConfig(path, section string, raw any) {
 	for dependencyName, nested := range mapping {
 		switch value := nested.(type) {
 		case string:
-			for _, version := range manifestVersionMatchers[dependencyName] {
+			incident, ok := incidentForPackage("npm", dependencyName)
+			if !ok {
+				continue
+			}
+			for _, version := range incident.Versions {
 				if !containsVersionToken(value, version) {
 					continue
 				}
 				s.addFinding(Finding{
-					Severity: "warning",
-					Category: "manifest-reference",
-					Package:  dependencyName,
-					Version:  version,
-					Path:     path,
-					Details:  fmt.Sprintf("%s pins %s with value %q. This is a suspicious manifest reference and should be reviewed.", section, dependencyName, value),
+					Severity:  "warning",
+					Category:  "manifest-reference",
+					Ecosystem: "npm",
+					Package:   dependencyName,
+					Version:   version,
+					Path:      path,
+					Details:   fmt.Sprintf("%s pins %s with value %q. This is a suspicious manifest reference and should be reviewed.", section, dependencyName, value),
 				})
 			}
 		case map[string]any:
@@ -443,7 +486,7 @@ func (s *scanner) scanNPMJSONLockfile(path string) {
 				name = inferPackageNameFromPath(packagePath)
 			}
 			version, _ := mapping["version"].(string)
-			s.addLockfileFinding(path, name, version, fmt.Sprintf("npm lockfile resolves %s to %s at %s", name, version, packagePath))
+			s.addLockfileFinding("npm", path, name, version, fmt.Sprintf("npm lockfile resolves %s to %s at %s", name, version, packagePath))
 		}
 	}
 
@@ -459,7 +502,7 @@ func (s *scanner) walkNPMDependencies(path string, dependencies map[string]any) 
 			continue
 		}
 		version, _ := mapping["version"].(string)
-		s.addLockfileFinding(path, packageName, version, fmt.Sprintf("npm lockfile resolves %s to %s", packageName, version))
+		s.addLockfileFinding("npm", path, packageName, version, fmt.Sprintf("npm lockfile resolves %s to %s", packageName, version))
 
 		nestedDependencies, ok := mapping["dependencies"].(map[string]any)
 		if ok {
@@ -510,12 +553,12 @@ func (s *scanner) scanYarnLock(path string) {
 			if packageName == "" {
 				continue
 			}
-			s.addLockfileFinding(path, packageName, version, fmt.Sprintf("yarn lockfile resolves %s through selector %q", packageName, selector))
-			s.addResolutionFinding(path, packageName, resolution)
+			s.addLockfileFinding("npm", path, packageName, version, fmt.Sprintf("yarn lockfile resolves %s through selector %q", packageName, selector))
+			s.addResolutionFinding("npm", path, packageName, resolution)
 		}
 	}
 
-	s.scanRawTokens(path, data)
+	s.scanRawTokens("npm", path, data)
 }
 
 func (s *scanner) scanPNPMLock(path string) {
@@ -530,10 +573,10 @@ func (s *scanner) scanPNPMLock(path string) {
 		if len(match) != 3 {
 			continue
 		}
-		s.addLockfileFinding(path, match[1], match[2], fmt.Sprintf("pnpm lockfile contains %s@%s", match[1], match[2]))
+		s.addLockfileFinding("npm", path, match[1], match[2], fmt.Sprintf("pnpm lockfile contains %s@%s", match[1], match[2]))
 	}
 
-	s.scanRawTokens(path, data)
+	s.scanRawTokens("npm", path, data)
 }
 
 func (s *scanner) scanRawLockfile(path string) {
@@ -542,59 +585,67 @@ func (s *scanner) scanRawLockfile(path string) {
 		s.addError(path, err)
 		return
 	}
-	s.scanRawTokens(path, data)
+	s.scanRawTokens("npm", path, data)
 }
 
-func (s *scanner) scanRawTokens(path string, data []byte) {
-	for packageName, versions := range manifestVersionMatchers {
-		for _, version := range versions {
+func (s *scanner) scanRawTokens(ecosystem, path string, data []byte) {
+	for _, incident := range incidentsForEcosystem(ecosystem) {
+		for _, version := range incident.Versions {
+			packageName := incident.Package
 			token := []byte(packageName + "@" + version)
 			if !bytes.Contains(data, token) {
 				continue
 			}
 			s.addFinding(Finding{
-				Severity: "critical",
-				Category: "lockfile",
-				Package:  packageName,
-				Version:  version,
-				Path:     path,
-				Details:  fmt.Sprintf("raw lockfile content contains %s@%s", packageName, version),
+				Severity:  "critical",
+				Category:  "lockfile",
+				Ecosystem: ecosystem,
+				Package:   packageName,
+				Version:   version,
+				Path:      path,
+				Details:   fmt.Sprintf("raw lockfile content contains %s@%s", packageName, version),
 			})
 		}
 	}
 }
 
-func (s *scanner) addResolutionFinding(path, packageName, resolution string) {
+func (s *scanner) addResolutionFinding(ecosystem, path, packageName, resolution string) {
 	if resolution == "" {
 		return
 	}
-	for _, version := range manifestVersionMatchers[packageName] {
+	incident, ok := incidentForPackage(ecosystem, packageName)
+	if !ok {
+		return
+	}
+	for _, version := range incident.Versions {
 		token := packageName + "@npm:" + version
 		if !strings.Contains(resolution, token) {
 			continue
 		}
 		s.addFinding(Finding{
-			Severity: "critical",
-			Category: "lockfile",
-			Package:  packageName,
-			Version:  version,
-			Path:     path,
-			Details:  fmt.Sprintf("yarn resolution explicitly pins %s", token),
+			Severity:  "critical",
+			Category:  "lockfile",
+			Ecosystem: ecosystem,
+			Package:   packageName,
+			Version:   version,
+			Path:      path,
+			Details:   fmt.Sprintf("yarn resolution explicitly pins %s", token),
 		})
 	}
 }
 
-func (s *scanner) addLockfileFinding(path, packageName, version, details string) {
-	if !isMaliciousPackageVersion(packageName, version) {
+func (s *scanner) addLockfileFinding(ecosystem, path, packageName, version, details string) {
+	if !isCompromisedPackageVersion(ecosystem, packageName, version) {
 		return
 	}
 	s.addFinding(Finding{
-		Severity: "critical",
-		Category: "lockfile",
-		Package:  packageName,
-		Version:  version,
-		Path:     path,
-		Details:  details,
+		Severity:  "critical",
+		Category:  "lockfile",
+		Ecosystem: ecosystem,
+		Package:   packageName,
+		Version:   version,
+		Path:      path,
+		Details:   details,
 	})
 }
 
@@ -618,7 +669,7 @@ func (s *scanner) scanNodeModules(root string) {
 
 		switch entry.Name() {
 		case "axios", "plain-crypto-js":
-			s.scanInstalledPackage(filepath.Join(fullPath, "package.json"))
+			s.scanNPMInstalledPackage(filepath.Join(fullPath, "package.json"))
 		case ".pnpm":
 			s.scanPnpmStore(fullPath)
 		case "@types":
@@ -639,24 +690,25 @@ func (s *scanner) scanPnpmStore(root string) {
 			continue
 		}
 		fullPath := filepath.Join(root, entry.Name())
-		if packageName, version, ok := matchPackageVersionToken(entry.Name()); ok {
+		if packageName, version, ok := matchPackageVersionToken("npm", entry.Name()); ok {
 			s.addFinding(Finding{
-				Severity: "critical",
-				Category: "installed-package",
-				Package:  packageName,
-				Version:  version,
-				Path:     fullPath,
-				Details:  fmt.Sprintf("pnpm store directory name indicates %s@%s is installed", packageName, version),
+				Severity:  "critical",
+				Category:  "installed-package",
+				Ecosystem: "npm",
+				Package:   packageName,
+				Version:   version,
+				Path:      fullPath,
+				Details:   fmt.Sprintf("pnpm store directory name indicates %s@%s is installed", packageName, version),
 			})
 		}
 
 		for _, packageName := range []string{"axios", "plain-crypto-js"} {
-			s.scanInstalledPackage(filepath.Join(fullPath, "node_modules", packageName, "package.json"))
+			s.scanNPMInstalledPackage(filepath.Join(fullPath, "node_modules", packageName, "package.json"))
 		}
 	}
 }
 
-func (s *scanner) scanInstalledPackage(path string) {
+func (s *scanner) scanNPMInstalledPackage(path string) {
 	data, err := readFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -672,16 +724,17 @@ func (s *scanner) scanInstalledPackage(path string) {
 		return
 	}
 
-	if !isMaliciousPackageVersion(manifest.Name, manifest.Version) {
+	if !isCompromisedPackageVersion("npm", manifest.Name, manifest.Version) {
 		return
 	}
 	s.addFinding(Finding{
-		Severity: "critical",
-		Category: "installed-package",
-		Package:  manifest.Name,
-		Version:  manifest.Version,
-		Path:     path,
-		Details:  fmt.Sprintf("installed dependency %s@%s is currently present under node_modules", manifest.Name, manifest.Version),
+		Severity:  "critical",
+		Category:  "installed-package",
+		Ecosystem: "npm",
+		Package:   manifest.Name,
+		Version:   manifest.Version,
+		Path:      path,
+		Details:   fmt.Sprintf("installed dependency %s@%s is currently present under node_modules", manifest.Name, manifest.Version),
 	})
 }
 
@@ -693,6 +746,150 @@ func (s *scanner) scanHostIOCs() {
 	default:
 		s.scanUnixLikeIOCs()
 	}
+}
+
+func (s *scanner) scanPythonManifestText(path, format string) {
+	data, err := readFile(path)
+	if err != nil {
+		s.addError(path, err)
+		return
+	}
+
+	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	for lineNumber, line := range lines {
+		s.scanPythonManifestLine(path, format, lineNumber+1, line)
+	}
+}
+
+func (s *scanner) scanPythonManifestLine(path, format string, lineNumber int, line string) {
+	cleaned := strings.TrimSpace(stripInlineComment(line))
+	if cleaned == "" {
+		return
+	}
+
+	for _, incident := range incidentsForEcosystem("pypi") {
+		if !containsPackageReference(cleaned, incident.Ecosystem, incident.Package) {
+			continue
+		}
+		for _, version := range incident.Versions {
+			if !containsVersionToken(cleaned, version) {
+				continue
+			}
+			s.addFinding(Finding{
+				Severity:  "warning",
+				Category:  "manifest-reference",
+				Ecosystem: "pypi",
+				Package:   incident.Package,
+				Version:   version,
+				Path:      path,
+				Details:   fmt.Sprintf("%s line %d references %s with version %s. This does not prove installation, but it points to a known compromised release.", format, lineNumber, incident.Package, version),
+			})
+		}
+	}
+}
+
+func (s *scanner) scanPythonPackageBlockLock(path, format string) {
+	data, err := readFile(path)
+	if err != nil {
+		s.addError(path, err)
+		return
+	}
+
+	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	currentName := ""
+	currentVersion := ""
+	flush := func() {
+		if currentName == "" || currentVersion == "" {
+			currentName = ""
+			currentVersion = ""
+			return
+		}
+		s.addLockfileFinding("pypi", path, currentName, currentVersion, fmt.Sprintf("%s resolves %s to %s", format, currentName, currentVersion))
+		currentName = ""
+		currentVersion = ""
+	}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if packageBlockPattern.MatchString(trimmed) {
+			flush()
+			continue
+		}
+		if strings.HasPrefix(trimmed, "name = ") {
+			currentName = parseQuotedAssignmentValue(trimmed)
+			continue
+		}
+		if strings.HasPrefix(trimmed, "version = ") {
+			currentVersion = parseQuotedAssignmentValue(trimmed)
+		}
+	}
+
+	flush()
+}
+
+func (s *scanner) scanPipfileLock(path string) {
+	data, err := readFile(path)
+	if err != nil {
+		s.addError(path, err)
+		return
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		s.addError(path, fmt.Errorf("invalid JSON lockfile: %w", err))
+		return
+	}
+
+	for _, section := range []string{"default", "develop"} {
+		rawSection, ok := payload[section].(map[string]any)
+		if !ok {
+			continue
+		}
+		for packageName, rawEntry := range rawSection {
+			entry, ok := rawEntry.(map[string]any)
+			if !ok {
+				continue
+			}
+			versionSpec, _ := entry["version"].(string)
+			for _, incident := range incidentsForEcosystem("pypi") {
+				if normalizePackageName("pypi", packageName) != normalizePackageName("pypi", incident.Package) {
+					continue
+				}
+				for _, version := range incident.Versions {
+					if !containsVersionToken(versionSpec, version) {
+						continue
+					}
+					s.addLockfileFinding("pypi", path, packageName, version, fmt.Sprintf("Pipfile.lock %s section pins %s to %s", section, packageName, version))
+				}
+			}
+		}
+	}
+}
+
+func (s *scanner) scanPythonInstalledMetadata(path string) {
+	data, err := readFile(path)
+	if err != nil {
+		s.addError(path, err)
+		return
+	}
+
+	name, version := parsePythonMetadata(data)
+	if name == "" || version == "" {
+		return
+	}
+	if !isCompromisedPackageVersion("pypi", name, version) {
+		return
+	}
+
+	s.addFinding(Finding{
+		Severity:  "critical",
+		Category:  "installed-package",
+		Ecosystem: "pypi",
+		Package:   normalizePackageName("pypi", name),
+		Version:   version,
+		Path:      path,
+		Details:   fmt.Sprintf("installed Python distribution %s@%s is present in package metadata", normalizePackageName("pypi", name), version),
+	})
 }
 
 func (s *scanner) scanUnixLikeIOCs() {
@@ -858,17 +1055,6 @@ func containsVersionToken(spec, version string) bool {
 	return matcher.MatchString(spec)
 }
 
-func isMaliciousPackageVersion(packageName, version string) bool {
-	switch packageName {
-	case "axios":
-		return version == "1.14.1" || version == "0.30.4"
-	case "plain-crypto-js":
-		return version == "4.2.1"
-	default:
-		return false
-	}
-}
-
 func splitYarnSelectors(line string) []string {
 	parts := strings.Split(line, ",")
 	selectors := make([]string, 0, len(parts))
@@ -903,9 +1089,10 @@ func yarnSelectorPackageName(selector string) string {
 	return selector[:firstAt]
 }
 
-func matchPackageVersionToken(name string) (string, string, bool) {
-	for packageName, versions := range manifestVersionMatchers {
-		for _, version := range versions {
+func matchPackageVersionToken(ecosystem, name string) (string, string, bool) {
+	for _, incident := range incidentsForEcosystem(ecosystem) {
+		for _, version := range incident.Versions {
+			packageName := incident.Package
 			if strings.Contains(name, packageName+"@"+version) {
 				return packageName, version, true
 			}
@@ -1034,4 +1221,95 @@ func matchesPrefix(candidate, prefix string) bool {
 		return false
 	}
 	return candidate == prefix || strings.HasPrefix(candidate, prefix+"/")
+}
+
+func isInterestingFile(name string) bool {
+	if _, ok := exactInterestingFiles[name]; ok {
+		return true
+	}
+	return strings.HasPrefix(name, "requirements") && strings.HasSuffix(name, ".txt")
+}
+
+func stripInlineComment(line string) string {
+	if index := strings.Index(line, "#"); index >= 0 {
+		return line[:index]
+	}
+	return line
+}
+
+func containsPackageReference(text, ecosystem, packageName string) bool {
+	lowerText := strings.ToLower(text)
+	for _, candidate := range packageNameCandidates(ecosystem, packageName) {
+		if containsBoundedToken(lowerText, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsBoundedToken(text, token string) bool {
+	if text == "" || token == "" {
+		return false
+	}
+
+	searchFrom := 0
+	for {
+		index := strings.Index(text[searchFrom:], token)
+		if index == -1 {
+			return false
+		}
+		index += searchFrom
+		beforeOK := index == 0 || !isPackageNameCharacter(rune(text[index-1]))
+		afterIndex := index + len(token)
+		afterOK := afterIndex == len(text) || !isPackageNameCharacter(rune(text[afterIndex]))
+		if beforeOK && afterOK {
+			return true
+		}
+		searchFrom = index + 1
+	}
+}
+
+func isPackageNameCharacter(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z':
+		return true
+	case r >= 'A' && r <= 'Z':
+		return true
+	case r >= '0' && r <= '9':
+		return true
+	case r == '_', r == '-', r == '.', r == '/':
+		return true
+	default:
+		return false
+	}
+}
+
+func parseQuotedAssignmentValue(line string) string {
+	parts := strings.SplitN(line, "=", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	value := strings.TrimSpace(parts[1])
+	value = strings.Trim(value, `"'`)
+	return value
+}
+
+func parsePythonMetadata(data []byte) (string, string) {
+	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	name := ""
+	version := ""
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		switch {
+		case strings.HasPrefix(lower, "name:"):
+			name = strings.TrimSpace(trimmed[len("name:"):])
+		case strings.HasPrefix(lower, "version:"):
+			version = strings.TrimSpace(trimmed[len("version:"):])
+		}
+		if name != "" && version != "" {
+			break
+		}
+	}
+	return name, version
 }
