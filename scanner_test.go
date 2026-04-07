@@ -44,6 +44,9 @@ func TestScanDetectsManifestLockfileAndInstalledPackage(t *testing.T) {
 	if len(report.Findings) != 4 {
 		t.Fatalf("expected 4 findings, got %d: %#v", len(report.Findings), report.Findings)
 	}
+	if len(report.Usages) != 4 {
+		t.Fatalf("expected 4 usages, got %d: %#v", len(report.Usages), report.Usages)
+	}
 }
 
 func TestScanDetectsYarnAndPNPMLockfiles(t *testing.T) {
@@ -110,6 +113,7 @@ Version: 1.82.8
 	assertHasFinding(t, report, "litellm", "1.82.7", "manifest-reference")
 	assertHasFinding(t, report, "litellm", "1.82.8", "lockfile")
 	assertHasFinding(t, report, "litellm", "1.82.8", "installed-package")
+	assertHasUsageWithStatus(t, report, "litellm", "1.82.8", "installed-package", "compromised")
 }
 
 func TestContainsVersionToken(t *testing.T) {
@@ -180,6 +184,58 @@ repo/private
 	assertHasFinding(t, report, "axios", "0.30.4", "lockfile")
 }
 
+func TestScanReportsSafeTrackedUsage(t *testing.T) {
+	root := t.TempDir()
+
+	writeFile(t, filepath.Join(root, "repo", "package.json"), `{
+  "name": "demo",
+  "dependencies": {
+    "axios": "^1.14.0"
+  }
+}`)
+
+	writeFile(t, filepath.Join(root, "repo", "node_modules", "axios", "package.json"), `{
+  "name": "axios",
+  "version": "1.14.0"
+}`)
+
+	report := Scan(Config{
+		Roots:      []string{root},
+		IncludeIOC: false,
+	})
+
+	if len(report.Findings) != 0 {
+		t.Fatalf("expected no findings, got %#v", report.Findings)
+	}
+
+	assertHasUsageWithStatus(t, report, "axios", "", "manifest", "unknown")
+	assertHasUsageWithStatus(t, report, "axios", "1.14.0", "installed-package", "safe")
+}
+
+func TestProjectInferenceUsesProjectRoot(t *testing.T) {
+	root := t.TempDir()
+	projectDir := filepath.Join(root, "repo")
+
+	writeFile(t, filepath.Join(projectDir, "package.json"), `{"name":"demo","dependencies":{"axios":"1.14.0"}}`)
+	writeFile(t, filepath.Join(projectDir, "node_modules", "axios", "package.json"), `{"name":"axios","version":"1.14.0"}`)
+
+	report := Scan(Config{
+		Roots:      []string{root},
+		IncludeIOC: false,
+	})
+
+	for _, usage := range report.Usages {
+		if usage.Package == "axios" && usage.Source == "installed-package" {
+			if usage.Project != projectDir {
+				t.Fatalf("expected project %s, got %s", projectDir, usage.Project)
+			}
+			return
+		}
+	}
+
+	t.Fatalf("expected installed-package usage, got %#v", report.Usages)
+}
+
 func TestScanDetectsLiteLLMInPipfileLock(t *testing.T) {
 	root := t.TempDir()
 
@@ -227,4 +283,16 @@ func assertHasFinding(t *testing.T, report Report, packageName, version, categor
 		}
 	}
 	t.Fatalf("expected finding %s@%s (%s), got %#v", packageName, version, category, report.Findings)
+}
+
+func assertHasUsageWithStatus(t *testing.T, report Report, packageName, version, source, status string) {
+	t.Helper()
+	for _, usage := range report.Usages {
+		if usage.Package == packageName && usage.Source == source && usage.Status == status {
+			if version == "" || usage.Version == version {
+				return
+			}
+		}
+	}
+	t.Fatalf("expected usage %s@%s source=%s status=%s, got %#v", packageName, version, source, status, report.Usages)
 }

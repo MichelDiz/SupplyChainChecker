@@ -2,6 +2,11 @@
 
 Go scanner for investigating known supply chain compromise versions across ecosystems.
 
+It reports two things:
+
+- `findings`: confirmed compromised versions or IOC evidence
+- `usages`: where tracked packages were found, even when the observed version is safe or not yet verified
+
 It checks:
 
 - npm manifests and lockfiles: `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`
@@ -106,6 +111,8 @@ Rules:
 - A Python manifest that references `litellm==1.82.7` or `litellm==1.82.8` is a sign of risk, but does not prove installation.
 - A lockfile or `node_modules` pointing to `1.14.1` or `0.30.4` is strong evidence of exposure.
 - A Python lockfile or installed package metadata pointing to LiteLLM `1.82.7` or `1.82.8` is strong evidence of exposure.
+- Safe usage is also reported so you can see which project uses a tracked package even when the observed version is not one of the compromised releases.
+- Manifest-only references can show up as `unknown` because a declared spec alone does not always prove the installed version.
 - If a machine installed these versions within the attack timeframe of `2026-03-31`, treat the environment as potentially compromised and rotate secrets.
 
 ## Extending

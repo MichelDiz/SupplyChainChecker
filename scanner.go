@@ -72,16 +72,17 @@ type Config struct {
 }
 
 type Report struct {
-	Roots           []string      `json:"roots"`
-	UsedDefaultRoot bool          `json:"used_default_root"`
-	IgnoreFiles     []string      `json:"ignore_files,omitempty"`
-	StartedAt       time.Time     `json:"started_at"`
-	FinishedAt      time.Time     `json:"finished_at"`
-	Duration        time.Duration `json:"duration"`
-	Stats           Stats         `json:"stats"`
-	Findings        []Finding     `json:"findings"`
-	Errors          []ScanError   `json:"errors"`
-	FatalError      string        `json:"fatal_error,omitempty"`
+	Roots           []string       `json:"roots"`
+	UsedDefaultRoot bool           `json:"used_default_root"`
+	IgnoreFiles     []string       `json:"ignore_files,omitempty"`
+	StartedAt       time.Time      `json:"started_at"`
+	FinishedAt      time.Time      `json:"finished_at"`
+	Duration        time.Duration  `json:"duration"`
+	Stats           Stats          `json:"stats"`
+	Usages          []PackageUsage `json:"usages"`
+	Findings        []Finding      `json:"findings"`
+	Errors          []ScanError    `json:"errors"`
+	FatalError      string         `json:"fatal_error,omitempty"`
 }
 
 type Stats struct {
@@ -121,9 +122,11 @@ type ScanError struct {
 }
 
 type scanner struct {
-	report    Report
-	skipNames map[string]struct{}
-	dedup     map[string]struct{}
+	report       Report
+	skipNames    map[string]struct{}
+	dedup        map[string]struct{}
+	usageDedup   map[string]struct{}
+	projectCache map[string]string
 }
 
 type ignoreMatcher struct {
@@ -154,8 +157,10 @@ func Scan(cfg Config) Report {
 		report: Report{
 			StartedAt: startedAt,
 		},
-		skipNames: make(map[string]struct{}),
-		dedup:     make(map[string]struct{}),
+		skipNames:    make(map[string]struct{}),
+		dedup:        make(map[string]struct{}),
+		usageDedup:   make(map[string]struct{}),
+		projectCache: make(map[string]string),
 	}
 
 	for name := range defaultSkipDirs {
@@ -207,6 +212,16 @@ func (r Report) WarningCount() int {
 	return count
 }
 
+func (r Report) UsageStatusCount(status string) int {
+	count := 0
+	for _, usage := range r.Usages {
+		if usage.Status == status {
+			count++
+		}
+	}
+	return count
+}
+
 func (s *scanner) finish() {
 	s.report.FinishedAt = time.Now()
 	s.report.Duration = s.report.FinishedAt.Sub(s.report.StartedAt).Round(time.Millisecond)
@@ -220,6 +235,16 @@ func (s *scanner) finish() {
 	sort.Slice(s.report.Errors, func(i, j int) bool {
 		return s.report.Errors[i].Path < s.report.Errors[j].Path
 	})
+	sort.Slice(s.report.Usages, func(i, j int) bool {
+		left := s.report.Usages[i]
+		right := s.report.Usages[j]
+		leftKey := strings.Join([]string{left.Status, left.Ecosystem, left.Package, left.Project, left.Path, left.Version, left.VersionSpec, left.Source}, "|")
+		rightKey := strings.Join([]string{right.Status, right.Ecosystem, right.Package, right.Project, right.Path, right.Version, right.VersionSpec, right.Source}, "|")
+		return leftKey < rightKey
+	})
+	if s.report.Usages == nil {
+		s.report.Usages = []PackageUsage{}
+	}
 	if s.report.Findings == nil {
 		s.report.Findings = []Finding{}
 	}
@@ -408,6 +433,7 @@ func (s *scanner) scanManifestSection(path, section string, raw any) {
 		if !ok {
 			continue
 		}
+		s.recordManifestUsage("npm", path, dependencyName, spec, section)
 		incident, ok := incidentForPackage("npm", dependencyName)
 		if !ok {
 			continue
@@ -438,6 +464,7 @@ func (s *scanner) scanNestedDependencyConfig(path, section string, raw any) {
 	for dependencyName, nested := range mapping {
 		switch value := nested.(type) {
 		case string:
+			s.recordManifestUsage("npm", path, dependencyName, value, section)
 			incident, ok := incidentForPackage("npm", dependencyName)
 			if !ok {
 				continue
@@ -635,6 +662,9 @@ func (s *scanner) addResolutionFinding(ecosystem, path, packageName, resolution 
 }
 
 func (s *scanner) addLockfileFinding(ecosystem, path, packageName, version, details string) {
+	if !s.recordResolvedUsage(ecosystem, "lockfile", path, packageName, version, "", details) {
+		return
+	}
 	if !isCompromisedPackageVersion(ecosystem, packageName, version) {
 		return
 	}
@@ -724,6 +754,9 @@ func (s *scanner) scanNPMInstalledPackage(path string) {
 		return
 	}
 
+	if !s.recordResolvedUsage("npm", "installed-package", path, manifest.Name, manifest.Version, "", fmt.Sprintf("installed dependency %s@%s is present under node_modules", manifest.Name, manifest.Version)) {
+		return
+	}
 	if !isCompromisedPackageVersion("npm", manifest.Name, manifest.Version) {
 		return
 	}
@@ -771,6 +804,7 @@ func (s *scanner) scanPythonManifestLine(path, format string, lineNumber int, li
 		if !containsPackageReference(cleaned, incident.Ecosystem, incident.Package) {
 			continue
 		}
+		s.recordManifestUsage("pypi", path, incident.Package, cleaned, format)
 		for _, version := range incident.Versions {
 			if !containsVersionToken(cleaned, version) {
 				continue
@@ -875,6 +909,9 @@ func (s *scanner) scanPythonInstalledMetadata(path string) {
 
 	name, version := parsePythonMetadata(data)
 	if name == "" || version == "" {
+		return
+	}
+	if !s.recordResolvedUsage("pypi", "installed-package", path, name, version, "", fmt.Sprintf("installed Python distribution %s@%s is present in package metadata", normalizePackageName("pypi", name), version)) {
 		return
 	}
 	if !isCompromisedPackageVersion("pypi", name, version) {
@@ -1011,6 +1048,25 @@ func (s *scanner) addFinding(finding Finding) {
 	s.report.Findings = append(s.report.Findings, finding)
 }
 
+func (s *scanner) addUsage(usage PackageUsage) {
+	usage.Project = s.projectPathFor(usage.Path)
+	key := strings.Join([]string{
+		usage.Status,
+		usage.Source,
+		usage.Ecosystem,
+		usage.Package,
+		usage.Version,
+		usage.VersionSpec,
+		usage.Project,
+		usage.Path,
+	}, "|")
+	if _, exists := s.usageDedup[key]; exists {
+		return
+	}
+	s.usageDedup[key] = struct{}{}
+	s.report.Usages = append(s.report.Usages, usage)
+}
+
 func (s *scanner) addError(path string, err error) {
 	if err == nil {
 		return
@@ -1033,6 +1089,58 @@ func readFile(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
+func (s *scanner) recordManifestUsage(ecosystem, path, packageName, spec, source string) {
+	incident, ok := incidentForPackage(ecosystem, packageName)
+	if !ok {
+		return
+	}
+
+	status := "unknown"
+	version := ""
+	if exactVersion, ok := extractExactVersionFromSpec(ecosystem, packageName, spec); ok {
+		version = exactVersion
+		status = "safe"
+		if isCompromisedPackageVersion(ecosystem, packageName, exactVersion) {
+			status = "compromised"
+		}
+	}
+
+	s.addUsage(PackageUsage{
+		Status:      status,
+		Source:      "manifest",
+		Ecosystem:   ecosystem,
+		Package:     incident.Package,
+		Version:     version,
+		VersionSpec: spec,
+		Path:        path,
+		Details:     source + " references a tracked package. Manifest evidence alone does not confirm the installed version unless the spec is exact.",
+	})
+}
+
+func (s *scanner) recordResolvedUsage(ecosystem, source, path, packageName, version, spec, details string) bool {
+	incident, ok := incidentForPackage(ecosystem, packageName)
+	if !ok {
+		return false
+	}
+
+	status := "safe"
+	if isCompromisedPackageVersion(ecosystem, packageName, version) {
+		status = "compromised"
+	}
+
+	s.addUsage(PackageUsage{
+		Status:      status,
+		Source:      source,
+		Ecosystem:   ecosystem,
+		Package:     incident.Package,
+		Version:     version,
+		VersionSpec: spec,
+		Path:        path,
+		Details:     details,
+	})
+	return true
+}
+
 func inferPackageNameFromPath(packagePath string) string {
 	normalized := filepath.ToSlash(packagePath)
 	parts := strings.Split(normalized, "/")
@@ -1053,6 +1161,41 @@ func containsVersionToken(spec, version string) bool {
 	pattern := fmt.Sprintf(`(^|[^0-9])%s([^0-9]|$)`, replacer.Replace(version))
 	matcher := regexp.MustCompile(pattern)
 	return matcher.MatchString(spec)
+}
+
+func extractExactVersionFromSpec(ecosystem, packageName, spec string) (string, bool) {
+	trimmed := strings.TrimSpace(strings.Trim(spec, `"'`))
+	if trimmed == "" {
+		return "", false
+	}
+
+	if ecosystem == "npm" && strings.HasPrefix(trimmed, "npm:") {
+		if lastAt := strings.LastIndex(trimmed, "@"); lastAt >= 0 && lastAt+1 < len(trimmed) {
+			candidate := trimmed[lastAt+1:]
+			if isExactVersion(candidate) {
+				return candidate, true
+			}
+		}
+	}
+
+	for _, prefix := range []string{"===", "==", "="} {
+		if strings.HasPrefix(trimmed, prefix) {
+			candidate := strings.TrimSpace(trimmed[len(prefix):])
+			if isExactVersion(candidate) {
+				return candidate, true
+			}
+		}
+	}
+
+	if isExactVersion(trimmed) {
+		return trimmed, true
+	}
+
+	return "", false
+}
+
+func isExactVersion(value string) bool {
+	return regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(strings.TrimSpace(value))
 }
 
 func splitYarnSelectors(line string) []string {
@@ -1099,6 +1242,76 @@ func matchPackageVersionToken(ecosystem, name string) (string, string, bool) {
 		}
 	}
 	return "", "", false
+}
+
+func (s *scanner) projectPathFor(path string) string {
+	if path == "" {
+		return ""
+	}
+
+	cleanPath := filepath.Clean(path)
+	if project, ok := s.projectCache[cleanPath]; ok {
+		return project
+	}
+
+	project := inferProjectPath(cleanPath)
+	if project == "" {
+		project = filepath.Dir(cleanPath)
+	}
+	s.projectCache[cleanPath] = project
+	return project
+}
+
+func inferProjectPath(path string) string {
+	normalized := filepath.ToSlash(filepath.Clean(path))
+	parts := strings.Split(normalized, "/")
+	for i, part := range parts {
+		switch part {
+		case "node_modules", ".venv", "venv", "env":
+			if i > 0 {
+				return filepath.FromSlash(strings.Join(parts[:i], "/"))
+			}
+		}
+	}
+
+	currentDir := path
+	if fileExists(path) {
+		currentDir = filepath.Dir(path)
+	}
+
+	for {
+		if hasProjectMarker(currentDir) {
+			return currentDir
+		}
+		parentDir := filepath.Dir(currentDir)
+		if parentDir == currentDir {
+			return currentDir
+		}
+		currentDir = parentDir
+	}
+}
+
+func hasProjectMarker(dir string) bool {
+	for _, marker := range []string{
+		"package.json",
+		"package-lock.json",
+		"yarn.lock",
+		"pnpm-lock.yaml",
+		"pyproject.toml",
+		"uv.lock",
+		"poetry.lock",
+		"Pipfile",
+		"Pipfile.lock",
+		"requirements.txt",
+		"setup.py",
+		"setup.cfg",
+		".git",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, marker)); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func candidateTempRoots() []string {
