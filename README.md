@@ -1,27 +1,45 @@
-# Supply Chain Checker
+# SupplyChainChecker
 
-Go scanner for investigating known supply chain compromise versions across ecosystems.
+[![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20windows%20%7C%20freebsd-lightgrey)]()
+[![License](https://img.shields.io/github/license/MichelDiz/SupplyChainChecker)](LICENSE)
+
+Fast Go scanner for **known supply-chain compromise exposure** across npm, PyPI,
+lockfiles, installed dependencies, and host IOCs. Built for **incident response
+triage** — answer one question quickly: *"was this machine or repository exposed
+to a known compromise?"*
 
 It reports two things:
 
-- `findings`: confirmed compromised versions or IOC evidence
-- `usages`: where tracked packages were found, even when the observed version is safe or not yet verified
+- **`findings`** — confirmed compromised versions or IOC evidence. Exit code `1`.
+- **`usages`** — every place a tracked package is referenced, even when the
+  observed version is currently safe. This is your triage context: it tells you
+  *which* projects use a package one patch away from a known compromise.
 
-It checks:
+## What it detects
 
-- npm manifests and lockfiles: `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`
-- Python manifests and lockfiles: `requirements*.txt`, `constraints.txt`, `pyproject.toml`, `uv.lock`, `poetry.lock`, `Pipfile`, `Pipfile.lock`, `setup.py`, `setup.cfg`
-- installed Node dependencies in `node_modules`
-- installed Python distributions via `METADATA` and `PKG-INFO` inside virtualenvs and `site-packages`
-- Basic host IOCs published by researchers for macOS, Linux, and Windows
+- npm packages — manifests and lockfiles: `package.json`, `package-lock.json`,
+  `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`.
+- Installed Node dependencies in `node_modules/`.
+- Python packages — manifests and lockfiles: `requirements*.txt`,
+  `constraints.txt`, `pyproject.toml`, `uv.lock`, `poetry.lock`, `Pipfile`,
+  `Pipfile.lock`, `setup.py`, `setup.cfg`.
+- Installed Python distributions via `METADATA` / `PKG-INFO` inside virtualenvs
+  and `site-packages/`.
+- Basic host IOCs published by researchers for macOS, Linux, and Windows.
 
-Versions treated as compromised:
+The current incident database is documented in [`docs/COVERAGE.md`](docs/COVERAGE.md).
+Roadmap (GitHub Actions, container images, Go modules, deeper Linux host
+posture checks) lives in [`ROADMAP.md`](ROADMAP.md).
 
-- `litellm@1.82.7`
-- `litellm@1.82.8`
-- `axios@1.14.1`
-- `axios@0.30.4`
-- `plain-crypto-js@4.2.1`
+## What it is not
+
+- Not an SCA replacement (Snyk / Dependabot / Trivy).
+- Not an SBOM generator.
+- Not an antivirus.
+- Not a generic vulnerability scanner.
+- It does **not** rotate secrets or remove packages. Remediation is
+  **suggested**, never executed.
 
 ## Build
 
@@ -32,41 +50,44 @@ go build -o supplychainchecker .
 Cross-compile:
 
 ```bash
-GOOS=linux GOARCH=amd64 go build -o supplychainchecker-linux .
-GOOS=windows GOARCH=amd64 go build -o supplychainchecker.exe .
-GOOS=darwin GOARCH=arm64 go build -o supplychainchecker-macos .
+GOOS=linux   GOARCH=amd64 go build -o supplychainchecker-linux-amd64   .
+GOOS=linux   GOARCH=arm64 go build -o supplychainchecker-linux-arm64   .
+GOOS=darwin  GOARCH=arm64 go build -o supplychainchecker-darwin-arm64  .
+GOOS=darwin  GOARCH=amd64 go build -o supplychainchecker-darwin-amd64  .
+GOOS=freebsd GOARCH=amd64 go build -o supplychainchecker-freebsd-amd64 .
+GOOS=windows GOARCH=amd64 go build -o supplychainchecker.exe           .
 ```
 
 ## Usage
 
-By default, it scans the current user's home directory. On macOS, this is usually something like `/Users/your-username`, not the entire disk.
+By default, it scans the current user's home directory.
 
 ```bash
 ./supplychainchecker
 ```
 
-Scanning specific roots:
+Scan specific roots:
 
 ```bash
 ./supplychainchecker -root ~/DEV -root ~/Documents
 ```
 
-Scanning a specific directory and skipping known names:
-
-```bash
-./supplychainchecker -root ~/DEV -skip-dir vendor -skip-dir archive
-```
-
-JSON output:
+JSON output (recommended for piping into other tools):
 
 ```bash
 ./supplychainchecker -root ~/DEV -json
 ```
 
-Disabling host IOC coverage and scanning only project files:
+Scan project files only, skip host-level IOC checks:
 
 ```bash
 ./supplychainchecker -root ~/DEV -no-ioc
+```
+
+Skip noisy directories:
+
+```bash
+./supplychainchecker -root ~/DEV -skip-dir vendor -skip-dir archive
 ```
 
 Windows:
@@ -77,16 +98,17 @@ Windows:
 
 ## `.checkignore`
 
-If you want to use `HOME` as root without entering noisy folders, create a `.checkignore` in the scanned root.
+If you want to scan `HOME` without descending into noisy folders, drop a
+`.checkignore` file in the scanned root.
 
-Example in `~/.checkignore`:
+Example `~/.checkignore`:
 
 ```text
-# ignores by name at any level
+# ignored at any level
 Library
 .Trash
 
-# ignores by path relative to the root
+# ignored only at this relative path
 Applications
 Downloads
 DEV/archive
@@ -94,32 +116,58 @@ DEV/archive
 
 Rules:
 
-- empty line and comment with `#` are ignored
-- simple name like `Library` ignores any directory or file with that basename
-- path with `/` like `DEV/archive` ignores that prefix relative to the root
-- you can also change the file name with `-ignore-file`
+- Empty lines and comments (`#`) are ignored.
+- A simple name (`Library`) ignores any directory or file with that basename.
+- A path with `/` (`DEV/archive`) ignores that prefix relative to the root.
+- Customize the file name with `-ignore-file`.
 
 ## Exit codes
 
-- `0`: nothing suspicious found
-- `1`: suspicious findings found
-- `2`: fatal runtime error
+- `0` — nothing suspicious found.
+- `1` — at least one finding (potential exposure).
+- `2` — fatal runtime error.
 
-## Notes
+CI tip: pipe `-json` into `jq` to gate a build on findings of a chosen severity
+(once severity lands in v0.2).
 
-- A `package.json` with `^1.14.1` or `~1.14.1` is a sign of risk, but does not prove installation.
-- A Python manifest that references `litellm==1.82.7` or `litellm==1.82.8` is a sign of risk, but does not prove installation.
-- A lockfile or `node_modules` pointing to `1.14.1` or `0.30.4` is strong evidence of exposure.
-- A Python lockfile or installed package metadata pointing to LiteLLM `1.82.7` or `1.82.8` is strong evidence of exposure.
-- Safe usage is also reported so you can see which project uses a tracked package even when the observed version is not one of the compromised releases.
-- Manifest-only references can show up as `unknown` because a declared spec alone does not always prove the installed version.
-- If a machine installed these versions within the attack timeframe of `2026-03-31`, treat the environment as potentially compromised and rotate secrets.
+## Interpretation notes
+
+- A `package.json` with `^1.14.1` or `~1.14.1` is a **sign of risk**, but does
+  not prove installation — manifests express ranges.
+- A lockfile or `node_modules/<pkg>/package.json` pinned to a compromised
+  version is **strong evidence of exposure**.
+- A Python manifest pinning `litellm==1.82.7` is a sign of risk; a
+  `litellm-1.82.7.dist-info/METADATA` under a venv's `site-packages/` is strong
+  evidence.
+- Manifest-only references can show as `version=unknown` because the declared
+  spec alone does not always pin the installed version.
+- "Safe usage" is reported on purpose — it lets you spot projects sitting one
+  patch away from a known compromise.
+- **If you find that this machine installed a compromised version inside the
+  attack window, treat the environment as potentially compromised and rotate
+  secrets accordingly.**
 
 ## Extending
 
-New incidents live in `incidents.go`. To add another confirmed supply chain case, add one entry with:
+New incidents live in `incidents.go`. To add a confirmed supply-chain case, add
+one entry with:
 
-- `ecosystem`
-- `package`
-- compromised `versions`
-- a short `summary`
+- `Ecosystem`
+- `Package`
+- compromised `Versions`
+- a short `Summary`
+
+For broader contributions (parsers for new ecosystems, host checks, IOC
+expansions), see [`ROADMAP.md`](ROADMAP.md) and open an issue using the
+appropriate template.
+
+## Contributing
+
+- Bug reports, false positives, false negatives → issues.
+- Incident coverage requests → use the `incident-coverage` issue template
+  (planned in v0.2).
+- Security issues → see [`SECURITY.md`](SECURITY.md).
+
+## License
+
+[Apache License 2.0](LICENSE).
