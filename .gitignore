@@ -1,1 +1,87 @@
+# ---------- Go ----------
+# Compiled binaries (this project's outputs)
+supplychainchecker
+supplychainchecker.exe
+supplychainchecker-*
+sc
+sc.exe
+
+# Generic Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.a
+*.o
+
+# Go test artifacts
+*.test
+*.out
+coverage.out
+coverage.html
+coverage.txt
+profile.out
+*.prof
+
+# Go workspace
+go.work
+go.work.sum
+
+# Vendor (only enable if you go-mod-vendor)
+# vendor/
+
+# ---------- Output / dist ----------
 dist/
+build/
+bin/
+out/
+release/
+
+# ---------- macOS ----------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ---------- Windows ----------
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ---------- Linux ----------
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+
+# ---------- IDEs / editors ----------
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*.swn
+.project
+.settings/
+.classpath
+.netrwhist
+
+# ---------- Local config / secrets ----------
+.env
+.env.*
+!.env.example
+*.local
+config.local.*
+.envrc
+
+# ---------- Logs ----------
+*.log
+logs/
+
+# ---------- Misc ----------
+*.bak
+*.orig
+*.rej
+*.tmp
+.cache/
