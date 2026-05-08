@@ -196,6 +196,24 @@ result — it proves the scanner works).
 > `*.invalid` index URL), but that is defense-in-depth — the contract is
 > "these are read-only metadata files, treat them as such."
 
+### Forks and CI: SCA tools won't false-flag the fixtures
+
+The synthetic fixtures reference real compromised versions (`axios@1.14.1`,
+`litellm@1.82.7`, etc.). To stop GitHub Dependabot, OSV-Scanner, Trivy, Snyk,
+and CodeQL from treating those as real dependencies, the repo ships:
+
+| File | Effect |
+|---|---|
+| `.gitattributes` | marks `test/fixtures/**` as `linguist-vendored` + `linguist-generated`. GitHub language stats, CodeQL, and Dependabot all respect these markers. |
+| `.github/dependabot.yml` | only declares the project's real ecosystems (`gomod`, `github-actions`). The fixtures' npm/PyPI manifests are simply never visited. |
+| `osv-scanner.toml` | tells OSV-Scanner to ignore the fixtures subtree. |
+| `.trivyignore` | tells Trivy the same. |
+| `.snyk` | excludes the fixtures from Snyk. |
+
+If you fork this repo and use a different SCA tool, you may need to add an
+equivalent exclude rule for that tool. See `test/fixtures/README.md` for
+context.
+
 ## Extending
 
 New incidents live in `incidents.go`. To add a confirmed supply-chain case, add

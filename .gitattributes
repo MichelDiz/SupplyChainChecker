@@ -1,0 +1,28 @@
+# GitHub Linguist + Dependabot + Code Scanning hints.
+#
+# `linguist-vendored` and `linguist-generated` together tell GitHub that the
+# files under test/fixtures/ are NOT first-party project code:
+#
+#   * They do not count toward the repo's language statistics (no fake
+#     "JavaScript 70%" because of fixture package.json files).
+#   * GitHub Code Scanning (CodeQL) skips them by default.
+#   * Dependabot uses Linguist when deciding whether a manifest is
+#     project-relevant; vendored/generated paths are deprioritized.
+#   * `git diff` collapses them by default, so PR reviews stay focused.
+#
+# Even though `test/fixtures/` contains plain text/JSON/TOML, we still mark
+# them as `binary` to disable GitHub's syntax highlighting and "code" treatment
+# of the fixture manifests (axios package.json etc.) so they look exactly like
+# the inert metadata they are.
+
+test/fixtures/**            linguist-vendored=true
+test/fixtures/**            linguist-generated=true
+test/fixtures/**            -diff
+test/fixtures/**            -merge
+
+# Exception: keep README.md inside fixtures rendered normally so the warning
+# is readable on GitHub.
+test/fixtures/README.md     linguist-vendored=true linguist-generated=true diff merge
+
+# Normalize line endings everywhere else.
+* text=auto eol=lf

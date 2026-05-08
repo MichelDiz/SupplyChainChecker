@@ -1,0 +1,19 @@
+# Snyk policy.
+# https://docs.snyk.io/manage-issues/policies/the-.snyk-file
+#
+# test/fixtures/ contains synthetic, inert manifests used by the scanner's
+# end-to-end tests. They are NOT real project dependencies and must not be
+# treated as such by any SCA tool, including Snyk.
+
+version: v1.25.0
+
+# Tell Snyk to skip the fixtures tree entirely.
+exclude:
+  global:
+    - test/fixtures/**
+
+# Optional belt-and-suspenders: explicitly suppress findings for each fake
+# manifest under test/fixtures/. `expires` is set far in the future so this
+# does not become a forgotten silent suppression.
+patches: {}
+ignore: {}

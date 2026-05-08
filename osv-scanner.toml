@@ -1,0 +1,22 @@
+# OSV-Scanner configuration.
+#
+# test/fixtures/ contains synthetic manifests that intentionally reference
+# compromised package versions (the scanner's reason to exist). They are
+# inert metadata, not real dependencies. Telling OSV-Scanner this avoids
+# false positives in CI runs that scan the whole repo.
+#
+# https://google.github.io/osv-scanner/configuration/
+
+[[PackageOverrides]]
+# Catch-all for anything OSV would parse out of the fixtures tree.
+name = "*"
+# OSV-Scanner walks paths; ignore the entire fixtures subtree.
+ignore = true
+group = ["test-fixtures"]
+reason = "Synthetic inert metadata used for scanner end-to-end tests; never installed."
+
+# If you prefer path-based filtering and your OSV-Scanner version supports it,
+# use the IgnoredPath form:
+#
+# [[IgnoredPath]]
+# path = "test/fixtures/"
