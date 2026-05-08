@@ -1,0 +1,7 @@
+[[source]]
+url = "https://fixture-do-not-resolve.invalid/simple/"
+verify_ssl = true
+name = "fixture"
+
+[packages]
+lightning = "==2.6.3"

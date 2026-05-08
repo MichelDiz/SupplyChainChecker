@@ -1,0 +1,12 @@
+lockfileVersion: '9.0'
+
+importers:
+  .:
+    dependencies:
+      axios:
+        specifier: ^0.30.0
+        version: 0.30.4
+
+packages:
+  axios@0.30.4:
+    resolution: {integrity: sha512-FIXTURE}

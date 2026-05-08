@@ -1,0 +1,6 @@
+{
+  "lockfileVersion": 1,
+  "packages": {
+    "@cap-js/sqlite": ["@cap-js/sqlite@2.2.2", "", {}, "sha512-FIXTURE"]
+  }
+}

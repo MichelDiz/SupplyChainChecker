@@ -1,0 +1,11 @@
+[[package]]
+name = "xinference"
+version = "2.6.1"
+description = "FIXTURE"
+optional = false
+python-versions = ">=3.9"
+
+[metadata]
+lock-version = "2.0"
+python-versions = "^3.10"
+content-hash = "FIXTURE"

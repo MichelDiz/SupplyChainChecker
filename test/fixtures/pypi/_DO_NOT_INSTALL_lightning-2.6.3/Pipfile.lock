@@ -1,0 +1,15 @@
+{
+  "_meta": {
+    "hash": {"sha256": "FIXTURE"},
+    "pipfile-spec": 6,
+    "requires": {"python_version": "3.11"},
+    "sources": []
+  },
+  "default": {
+    "lightning": {
+      "version": "==2.6.3",
+      "hashes": ["sha256:FIXTURE"]
+    }
+  },
+  "develop": {}
+}

@@ -1,0 +1,8 @@
+# !!! SCANNER FIXTURE — DO NOT RUN uv/pip/poetry HERE !!!
+[project]
+name = "fixture-xinference-compromised"
+version = "0.0.0"
+dependencies = ["xinference==2.6.1"]
+
+[[tool.uv.index]]
+url = "https://fixture-do-not-resolve.invalid/"
