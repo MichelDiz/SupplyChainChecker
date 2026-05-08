@@ -19,45 +19,125 @@ func (m *multiFlag) Set(value string) error {
 	return nil
 }
 
+// CombinedReport is the JSON shape when both package and host checks run.
+// Each section is omitted when its mode wasn't requested.
+type CombinedReport struct {
+	Scan       *Report           `json:"scan,omitempty"`
+	HostChecks *HostChecksReport `json:"host_checks,omitempty"`
+}
+
 func main() {
 	var roots multiFlag
 	var skips multiFlag
 	var jsonOutput bool
 	var noIOC bool
 	var ignoreFile string
+	var hostChecks bool
+	var hostChecksOnly bool
 
 	flag.Var(&roots, "root", "Root directory to scan. Repeat the flag to scan multiple locations.")
 	flag.Var(&skips, "skip-dir", "Directory name to skip during traversal. Repeat the flag to add more names.")
 	flag.BoolVar(&jsonOutput, "json", false, "Print the full report as JSON.")
 	flag.BoolVar(&noIOC, "no-ioc", false, "Disable host IOC checks and scan only project files.")
 	flag.StringVar(&ignoreFile, "ignore-file", ".checkignore", "Ignore file name or absolute path. Default: .checkignore")
+	flag.BoolVar(&hostChecks, "host-checks", false, "Also run Linux host security posture checks (kernel CVEs, sshd, sudoers, unattended-upgrades).")
+	flag.BoolVar(&hostChecksOnly, "host-checks-only", false, "Run only the host security posture checks; skip filesystem scanning.")
 	flag.Parse()
 
-	report := Scan(Config{
-		Roots:      roots,
-		SkipDirs:   skips,
-		IncludeIOC: !noIOC,
-		IgnoreFile: ignoreFile,
-	})
+	var (
+		report     Report
+		hostReport HostChecksReport
+		runScan    = !hostChecksOnly
+		runHost    = hostChecks || hostChecksOnly
+	)
+
+	if runScan {
+		report = Scan(Config{
+			Roots:      roots,
+			SkipDirs:   skips,
+			IncludeIOC: !noIOC,
+			IgnoreFile: ignoreFile,
+		})
+	}
+	if runHost {
+		hostReport = RunHostChecks()
+	}
 
 	if jsonOutput {
+		combined := CombinedReport{}
+		if runScan {
+			combined.Scan = &report
+		}
+		if runHost {
+			combined.HostChecks = &hostReport
+		}
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
-		if err := encoder.Encode(report); err != nil {
+		if err := encoder.Encode(combined); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to encode report: %v\n", err)
 			os.Exit(2)
 		}
 	} else {
-		printTextReport(report)
+		if runScan {
+			printTextReport(report)
+		}
+		if runHost {
+			printHostChecksReport(hostReport)
+		}
 	}
 
+	// Exit code precedence: fatal > findings > vulnerable host checks > clean.
 	switch {
 	case report.FatalError != "":
 		os.Exit(2)
 	case len(report.Findings) > 0:
 		os.Exit(1)
+	case hostReport.VulnerableCount() > 0:
+		os.Exit(1)
 	default:
 		os.Exit(0)
+	}
+}
+
+func printHostChecksReport(r HostChecksReport) {
+	fmt.Println()
+	fmt.Println("Host Security Posture Checks")
+	fmt.Println()
+	fmt.Printf("Host:    %s (kernel %s, %s/%s)\n",
+		r.Context.Hostname, r.Context.Kernel,
+		r.Context.OS, r.Context.Arch)
+	if r.Context.Distro != "" {
+		fmt.Printf("Distro:  %s %s\n", r.Context.Distro, r.Context.DistroVer)
+	}
+	fmt.Printf("Summary: %d check(s), %d vulnerable\n", len(r.Checks), r.VulnerableCount())
+	fmt.Println()
+
+	for _, c := range r.Checks {
+		status := "PASS"
+		switch {
+		case c.NotApplicable:
+			status = "N/A"
+		case c.Vulnerable:
+			status = "FAIL"
+		}
+		fmt.Printf("[%s] %s — %s\n", strings.ToUpper(string(c.Severity)), status, c.Title)
+		fmt.Printf("       %s\n", c.ID)
+		if c.Evidence != "" {
+			fmt.Printf("       evidence: %s\n", c.Evidence)
+		}
+		if c.Vulnerable && len(c.Remediation) > 0 {
+			fmt.Println("       remediation:")
+			for _, step := range c.Remediation {
+				fmt.Printf("         - %s\n", step)
+			}
+		}
+		if len(c.References) > 0 {
+			fmt.Println("       references:")
+			for _, ref := range c.References {
+				fmt.Printf("         - %s\n", ref)
+			}
+		}
+		fmt.Println()
 	}
 }
 

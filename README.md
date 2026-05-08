@@ -32,6 +32,37 @@ The current incident database is documented in [`docs/COVERAGE.md`](docs/COVERAG
 Roadmap (GitHub Actions, container images, Go modules, deeper Linux host
 posture checks) lives in [`ROADMAP.md`](ROADMAP.md).
 
+## Linux host posture checks (beta)
+
+Beyond package fingerprints, the scanner can also check the host itself for
+known-bad security postures and report concrete remediation steps. This is
+intended for incident-response triage: "which of my Linux hosts is actually
+exposed to the recent kernel CVE wave?"
+
+```bash
+# Run only the host checks (no filesystem scan).
+./supplychainchecker -host-checks-only
+
+# Run both: package fingerprint scan AND host posture checks.
+./supplychainchecker -root /opt -host-checks
+```
+
+Coverage today (Linux only, expanding):
+
+| Check ID | Severity | Detects |
+|---|---|---|
+| `linux-kernel-copy-fail-CVE-2026-31431` | critical | running kernel below upstream fix; suggests modprobe blacklist of `algif_*` if unpatched |
+| `linux-kernel-dirty-frag-CVE-2026-43284-43500` | critical | running kernel below upstream fix; severity rebaixada para `medium` quando detecta modprobe blacklist de `esp4`/`esp6`/`rxrpc` |
+| `linux-pending-reboot` | medium | newer kernel installed but not booted yet |
+| `linux-ssh-password-auth-enabled` | medium | `PasswordAuthentication yes` in effective sshd config (parses `sshd_config` + `sshd_config.d/*.conf`) |
+| `linux-unattended-upgrades-disabled` | medium | Debian/Ubuntu only — package missing, or `APT::Periodic::Unattended-Upgrade` not set |
+| `linux-sudoers-integrity` | high | world-writable sudoers files; suspicious `NOPASSWD:` entries on regular users |
+
+Each finding ships with `evidence` (what the scanner saw) and `remediation`
+(commands the operator can run). On non-Linux hosts the scanner returns a
+single "platform not supported" info entry — coverage for macOS and Windows
+posture is on the roadmap.
+
 ## What it is not
 
 - Not an SCA replacement (Snyk / Dependabot / Trivy).
