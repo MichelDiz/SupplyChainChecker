@@ -147,6 +147,73 @@ CI tip: pipe `-json` into `jq` to gate a build on findings of a chosen severity
   attack window, treat the environment as potentially compromised and rotate
   secrets accordingly.**
 
+## Test it safely (without installing anything)
+
+The repo ships **synthetic, inert fixtures** under `test/fixtures/` that
+simulate the on-disk fingerprint of every covered incident — package names,
+versions, lockfile entries, `dist-info/METADATA` headers — but **contain zero
+executable code**. CI gates this: `scripts/verify-fixtures-safe.sh` rejects any
+PR that introduces a `*.py`/`*.js`/`*.sh`/`*.so` file or sets an executable
+bit inside that tree.
+
+### From source (Go)
+
+```bash
+go test ./... -run TestEndToEndAgainstFixtures -v
+```
+
+This runs the scanner against `test/fixtures/` and asserts that every
+compromised package is detected and that `safe-controls/` produces zero
+findings.
+
+### As a sandboxed container
+
+A demo image is provided that contains only the scanner binary and the inert
+fixtures, on a `FROM scratch` base — no shell, no libc, no package manager.
+Combined with the runtime flags below, it's safe to run on any machine:
+
+```bash
+docker build -f docker/Dockerfile.demo -t supplychainchecker-demo .
+
+docker run --rm \
+  --network=none \
+  --read-only \
+  --cap-drop=ALL \
+  --security-opt=no-new-privileges:true \
+  --pids-limit=64 \
+  --memory=256m \
+  supplychainchecker-demo
+```
+
+`--network=none` is the critical safeguard. The image is ~3 MB and exits with
+code `1` when it detects the seeded fixtures (which is the expected, intended
+result — it proves the scanner works).
+
+> ⚠️ **Never run `npm install` / `pnpm install` / `pip install` / `uv sync` /
+> `poetry install` inside `test/fixtures/`.** Some of the seeded incidents are
+> wormable on install. The fixtures are designed to fail any install attempt
+> (no `setup.py`, no `bin`, no install hooks; `pyproject.toml` points to a
+> `*.invalid` index URL), but that is defense-in-depth — the contract is
+> "these are read-only metadata files, treat them as such."
+
+### Forks and CI: SCA tools won't false-flag the fixtures
+
+The synthetic fixtures reference real compromised versions (`axios@1.14.1`,
+`litellm@1.82.7`, etc.). To stop GitHub Dependabot, OSV-Scanner, Trivy, Snyk,
+and CodeQL from treating those as real dependencies, the repo ships:
+
+| File | Effect |
+|---|---|
+| `.gitattributes` | marks `test/fixtures/**` as `linguist-vendored` + `linguist-generated`. GitHub language stats, CodeQL, and Dependabot all respect these markers. |
+| `.github/dependabot.yml` | only declares the project's real ecosystems (`gomod`, `github-actions`). The fixtures' npm/PyPI manifests are simply never visited. |
+| `osv-scanner.toml` | tells OSV-Scanner to ignore the fixtures subtree. |
+| `.trivyignore` | tells Trivy the same. |
+| `.snyk` | excludes the fixtures from Snyk. |
+
+If you fork this repo and use a different SCA tool, you may need to add an
+equivalent exclude rule for that tool. See `test/fixtures/README.md` for
+context.
+
 ## Extending
 
 New incidents live in `incidents.go`. To add a confirmed supply-chain case, add

@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -253,6 +254,83 @@ func TestScanDetectsLiteLLMInPipfileLock(t *testing.T) {
 	})
 
 	assertHasFinding(t, report, "litellm", "1.82.8", "lockfile")
+}
+
+func TestEndToEndAgainstFixtures(t *testing.T) {
+	// Scans the real on-disk fixtures shipped under test/fixtures/.
+	// Asserts:
+	//   - every "compromised" fixture is detected at least once.
+	//   - safe-controls/ never produces a finding.
+	//   - exit semantics: findings present (would exit 1 in CLI).
+	const fixturesRoot = "test/fixtures"
+	if _, err := os.Stat(fixturesRoot); err != nil {
+		t.Skipf("fixtures dir missing (%v); run from repo root", err)
+	}
+
+	report := Scan(Config{
+		Roots:      []string{fixturesRoot},
+		IncludeIOC: false,
+	})
+
+	type expected struct {
+		ecosystem string
+		pkg       string
+		version   string
+	}
+	mustDetect := []expected{
+		{"npm", "axios", "1.14.1"},
+		{"npm", "axios", "0.30.4"},
+		{"npm", "plain-crypto-js", "4.2.1"},
+		{"npm", "pgserve", "1.1.12"},
+		{"npm", "@bitwarden/cli", "2026.4.0"},
+		{"npm", "@cap-js/sqlite", "2.2.2"},
+		{"npm", "@cap-js/postgres", "2.2.2"},
+		{"npm", "@cap-js/db-service", "2.10.1"},
+		{"npm", "mbt", "1.2.48"},
+		{"npm", "intercom-client", "7.0.5"},
+		{"pypi", "litellm", "1.82.7"},
+		{"pypi", "telnyx", "4.87.1"},
+		{"pypi", "xinference", "2.6.1"},
+		{"pypi", "elementary-data", "0.23.3"},
+		{"pypi", "lightning", "2.6.3"},
+	}
+
+	detected := make(map[expected]bool)
+	for _, f := range report.Findings {
+		key := expected{f.Ecosystem, f.Package, f.Version}
+		detected[key] = true
+	}
+
+	missing := []expected{}
+	for _, want := range mustDetect {
+		if !detected[want] {
+			missing = append(missing, want)
+		}
+	}
+	if len(missing) > 0 {
+		t.Fatalf("scanner failed to detect %d expected compromised package(s): %#v", len(missing), missing)
+	}
+
+	// Negative control: safe-controls/ MUST NOT yield any findings.
+	for _, f := range report.Findings {
+		if strings.Contains(f.Path, "safe-controls/") {
+			t.Errorf("false positive in safe-controls: %#v", f)
+		}
+	}
+
+	// Sanity: untracked package (react) must not appear at all in usages either.
+	for _, u := range report.Usages {
+		if u.Package == "react" {
+			t.Errorf("untracked package react surfaced as usage: %#v", u)
+		}
+	}
+
+	if len(report.Findings) == 0 {
+		t.Fatal("expected findings > 0, got 0 (smoke check)")
+	}
+
+	t.Logf("end-to-end: %d findings across %d expected incidents (no false positives in safe-controls)",
+		len(report.Findings), len(mustDetect))
 }
 
 func TestNormalizeRootsReportsDefaultHomeUsage(t *testing.T) {

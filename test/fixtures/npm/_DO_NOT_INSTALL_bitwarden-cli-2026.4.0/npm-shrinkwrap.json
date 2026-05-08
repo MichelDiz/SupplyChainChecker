@@ -1,0 +1,8 @@
+{
+  "name": "fixture-bw-cli",
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"name":"fixture-bw-cli","version":"0.0.0"},
+    "node_modules/@bitwarden/cli": {"version":"2026.4.0","resolved":"https://fixture.invalid/","integrity":"sha512-FIXTURE"}
+  }
+}

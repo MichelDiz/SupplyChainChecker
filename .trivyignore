@@ -1,0 +1,6 @@
+# Trivy will skip files matching these patterns when scanning the repo.
+# test/fixtures/ contains synthetic metadata simulating compromised packages
+# for end-to-end scanner tests; nothing here is installed or reachable from
+# the project's real dependency graph.
+
+test/fixtures/

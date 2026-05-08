@@ -1,0 +1,3 @@
+# FIXTURE — DO NOT pip install -r this
+telnyx==4.87.1
+requests==2.32.3

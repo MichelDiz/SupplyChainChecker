@@ -1,0 +1,40 @@
+# Dependabot configuration.
+#
+# This repo deliberately ships SYNTHETIC, INERT manifests under test/fixtures/
+# that simulate compromised packages (axios@1.14.1, litellm@1.82.7, etc.) so
+# the scanner can be verified end-to-end without ever installing them.
+#
+# Dependabot must NOT scan that tree as if it were real project dependencies.
+# We achieve that by:
+#
+#   1. Listing only the project's *real* ecosystems below (Go modules + GitHub
+#      Actions). Anything we omit, Dependabot will not scan.
+#   2. Marking test/fixtures/** as linguist-vendored/linguist-generated in
+#      .gitattributes, which Dependabot respects.
+#
+# If you ever add a new real ecosystem to this repo (e.g., a frontend), add an
+# entry below. Do NOT add `package-ecosystem: npm` or `pip` for the fixtures.
+
+version: 2
+updates:
+  # Project source — Go modules.
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "type: refactor"
+
+  # GitHub Actions used by this repo's own CI workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "ecosystem: github-actions"

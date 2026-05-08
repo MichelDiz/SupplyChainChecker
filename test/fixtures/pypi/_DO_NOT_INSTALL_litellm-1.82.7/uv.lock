@@ -1,0 +1,7 @@
+version = 1
+revision = 1
+
+[[package]]
+name = "litellm"
+version = "1.82.7"
+source = { registry = "https://fixture.invalid/simple/" }

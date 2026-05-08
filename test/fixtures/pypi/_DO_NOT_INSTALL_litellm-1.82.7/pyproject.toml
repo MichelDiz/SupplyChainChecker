@@ -1,0 +1,8 @@
+# !!! SCANNER FIXTURE — DO NOT RUN uv/pip/poetry HERE !!!
+[project]
+name = "fixture-litellm-compromised"
+version = "0.0.0"
+dependencies = ["litellm==1.82.7"]
+
+[[tool.uv.index]]
+url = "https://fixture-do-not-resolve.invalid/"
