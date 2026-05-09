@@ -82,6 +82,76 @@ func TestKernelIsPatched_CopyFail(t *testing.T) {
 	}
 }
 
+// TestKernelIsPatched_UnknownInBetweenSeries — regression for the false PASS
+// observed against PBS running kernel 6.17.2-1-pve scanned with a fix table
+// that included 6.18 / 6.12 / 6.6 but NOT 6.17. The previous logic returned
+// "patched" because 6.17 was newer than 6.6 / 6.12. Conservative behavior:
+// in-between series must surface as vulnerable until the operator confirms
+// against the upstream advisory.
+func TestKernelIsPatched_UnknownInBetweenSeries(t *testing.T) {
+	fixedAt := []kernelFix{
+		{"7.0", "7.0.5"},
+		{"6.18", "6.18.28"},
+		{"6.12", "6.12.87"},
+		{"6.6", "6.6.138"},
+		{"6.1", "6.1.171"},
+		{"5.15", "5.15.205"},
+		{"5.10", "5.10.255"},
+	}
+	cases := []struct {
+		running string
+		patched bool
+		reason  string
+	}{
+		// In-between series (6.17 between 6.18 and 6.12) — must be conservative.
+		{"6.17.2-1-pve", false, "6.17 not in table; conservative"},
+		{"6.17.13-6-pve", false, "same — series unknown, version irrelevant"},
+		// Strictly newer than every entry — safe to call patched.
+		{"8.0.0", true, "newer than all listed series (max 7.0)"},
+		{"7.1.0", true, "newer than every series (7.0/6.x/5.x)"},
+		// Obviously older + unlisted — still "unknown ⇒ vulnerable".
+		{"4.19.0", false, "very old, not listed"},
+		// Listed series with explicit fix entry still wins.
+		{"7.0.5-1-pve", true, "explicit hit at fix version"},
+	}
+	for _, c := range cases {
+		got, ev := kernelIsPatched(c.running, fixedAt)
+		if got != c.patched {
+			t.Errorf("kernelIsPatched(%q) = %v (%s); want %v (%s)",
+				c.running, got, ev, c.patched, c.reason)
+		}
+	}
+}
+
+func TestIsSeriesNewerThanAll(t *testing.T) {
+	fixedAt := []kernelFix{
+		{"7.0", "7.0.5"},
+		{"6.18", "6.18.28"},
+		{"6.12", "6.12.87"},
+	}
+	cases := []struct {
+		maj, min int
+		want     bool
+	}{
+		{8, 0, true},   // newer than all (7.0/6.18/6.12)
+		{7, 1, true},   // newer than all
+		{7, 0, false},  // equal to highest, not strictly newer
+		{6, 19, false}, // newer than 6.18/6.12 but NOT than 7.0
+		{6, 17, false}, // in-between
+		{6, 12, false}, // equal to listed
+		{5, 99, false}, // older than all
+	}
+	for _, c := range cases {
+		if got := isSeriesNewerThanAll(c.maj, c.min, fixedAt); got != c.want {
+			t.Errorf("isSeriesNewerThanAll(%d.%d) = %v, want %v", c.maj, c.min, got, c.want)
+		}
+	}
+	// Empty table sanity.
+	if isSeriesNewerThanAll(99, 99, nil) {
+		t.Error("empty fix table must return false (cannot prove newer than nothing)")
+	}
+}
+
 // ----------------------------------------------------------------------------
 // os-release / sshd_config parsers
 // ----------------------------------------------------------------------------

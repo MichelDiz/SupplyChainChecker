@@ -474,7 +474,15 @@ type kernelFix struct {
 }
 
 // kernelIsPatched returns (true, evidence) if `running` is at or above the
-// minVer for its series, or the series is newer than any in fixedAt.
+// minVer for its series.
+//
+// For series that are NOT in the fix table the function is intentionally
+// conservative: only when the running series is strictly newer than EVERY
+// listed series do we assume the issue is fixed. Otherwise the result is
+// "vulnerable until proven otherwise" — the caller must surface a finding
+// so the operator can investigate. Returning false here was an earlier bug
+// (false PASS for an in-between mainline series like 6.17 sitting between
+// 6.18 and 6.12 in the fix table).
 func kernelIsPatched(running string, fixedAt []kernelFix) (bool, string) {
 	maj, min, _, ok := parseKernelVersion(running)
 	if !ok {
@@ -491,24 +499,32 @@ func kernelIsPatched(running string, fixedAt []kernelFix) (bool, string) {
 		}
 		return false, fmt.Sprintf("running=%s < fixed=%s (series %s)", running, f.minVer, series)
 	}
-	// Series not in the table — assume newer than anything covered.
-	if isSeriesNewerThanAny(maj, min, fixedAt) {
-		return true, fmt.Sprintf("running=%s, series %s newer than known affected series", running, series)
+	// Series not in the table — be conservative.
+	if isSeriesNewerThanAll(maj, min, fixedAt) {
+		return true, fmt.Sprintf("running=%s, series %s newer than every known affected series", running, series)
 	}
-	return false, fmt.Sprintf("running=%s, series %s not in fix table (treat as unknown)", running, series)
+	return false, fmt.Sprintf("running=%s, series %s not in fix table; treating as vulnerable until verified against the upstream advisory", running, series)
 }
 
-func isSeriesNewerThanAny(maj, min int, fixedAt []kernelFix) bool {
+// isSeriesNewerThanAll returns true only when the running major.minor is
+// strictly newer than ALL series listed in fixedAt. Used to distinguish
+// "obviously newer mainline (e.g. 8.x vs a 7.x table)" from "in-between
+// series we cannot reason about (e.g. 6.17 against a table of 7.0/6.18/6.12)".
+func isSeriesNewerThanAll(maj, min int, fixedAt []kernelFix) bool {
+	if len(fixedAt) == 0 {
+		return false
+	}
 	for _, f := range fixedAt {
 		fm, fn, _, ok := parseKernelVersion(f.series + ".0")
 		if !ok {
 			continue
 		}
-		if maj > fm || (maj == fm && min > fn) {
-			return true
+		// If running is NOT strictly newer than this listed series, bail.
+		if maj < fm || (maj == fm && min <= fn) {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 // parseKernelVersion extracts the leading semver-like prefix from a kernel
