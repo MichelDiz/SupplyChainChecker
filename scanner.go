@@ -324,6 +324,10 @@ func (s *scanner) scanDir(root, dir string, matcher ignoreMatcher) {
 				s.scanNodeModules(fullPath)
 				continue
 			}
+			if entry.Name() == ".yarn" {
+				s.scanYarnPnPRoot(fullPath)
+				continue
+			}
 			if s.shouldSkipDir(dir, entry.Name()) {
 				continue
 			}
@@ -688,18 +692,21 @@ func (s *scanner) scanNodeModules(root string) {
 	}
 
 	for _, entry := range entries {
-		if entry.Type()&os.ModeSymlink != 0 {
+		name := entry.Name()
+		fullPath := filepath.Join(root, name)
+		isSymlink := entry.Type()&os.ModeSymlink != 0
+
+		if isSymlink {
+			s.followNodeModulesSymlink(fullPath, name)
 			continue
 		}
 		if !entry.IsDir() {
 			continue
 		}
-		name := entry.Name()
-		fullPath := filepath.Join(root, name)
 
 		switch {
-		case name == ".pnpm":
-			s.scanPnpmStore(fullPath)
+		case name == ".pnpm" || name == ".bun":
+			s.scanIsolatedStore(fullPath, name)
 		case name == "@types":
 			// no-op
 		case strings.HasPrefix(name, "@"):
@@ -717,15 +724,43 @@ func (s *scanner) scanNodeModulesScopeDir(scopeDir, scope string) {
 		return
 	}
 	for _, entry := range entries {
+		name := entry.Name()
+		fullPath := filepath.Join(scopeDir, name)
+		canonical := scope + "/" + name
+
 		if entry.Type()&os.ModeSymlink != 0 {
+			s.followNodeModulesSymlink(fullPath, canonical)
 			continue
 		}
 		if !entry.IsDir() {
 			continue
 		}
-		fullPath := filepath.Join(scopeDir, entry.Name())
-		s.processInstalledPackageDir(fullPath, scope+"/"+entry.Name())
+		s.processInstalledPackageDir(fullPath, canonical)
 	}
+}
+
+// followNodeModulesSymlink resolves a symlink at <node_modules>/<pkg> (or
+// <node_modules>/@scope/<pkg>) when the visible name matches a tracked
+// incident. This covers pnpm's global virtual store (pnpm >= 10.12) and
+// bun's isolated linker, where node_modules/<pkg> is a symlink into a
+// content-addressable store outside the project tree.
+//
+// We do NOT follow symlinks for untracked names — that would explode the
+// scan into the global store on every machine. We rely on filepath.EvalSymlinks
+// to short-circuit cycles.
+func (s *scanner) followNodeModulesSymlink(linkPath, pkgName string) {
+	if _, ok := incidentForPackage("npm", pkgName); !ok {
+		return
+	}
+	target, err := filepath.EvalSymlinks(linkPath)
+	if err != nil {
+		return
+	}
+	info, err := os.Stat(target)
+	if err != nil || !info.IsDir() {
+		return
+	}
+	s.scanNPMInstalledPackage(filepath.Join(target, "package.json"))
 }
 
 // processInstalledPackageDir handles one <node_modules>/<pkg> dir: it reads
@@ -745,7 +780,10 @@ func (s *scanner) processInstalledPackageDir(pkgDir, pkgName string) {
 	s.scanNodeModules(nested)
 }
 
-func (s *scanner) scanPnpmStore(root string) {
+// scanIsolatedStore handles pnpm's .pnpm/ and bun's .bun/ directories,
+// which use the same layout: store entries named <pkg>@<ver> (or
+// <scope>+<pkg>@<ver> for scoped) each containing a node_modules/ tree.
+func (s *scanner) scanIsolatedStore(root, kind string) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		s.addError(root, err)
@@ -765,7 +803,7 @@ func (s *scanner) scanPnpmStore(root string) {
 				Package:   packageName,
 				Version:   version,
 				Path:      fullPath,
-				Details:   fmt.Sprintf("pnpm store directory name indicates %s@%s is installed", packageName, version),
+				Details:   fmt.Sprintf("%s store directory name indicates %s@%s is installed", kind, packageName, version),
 			})
 		}
 		nested := filepath.Join(fullPath, "node_modules")
@@ -774,6 +812,77 @@ func (s *scanner) scanPnpmStore(root string) {
 			continue
 		}
 		s.scanNodeModules(nested)
+	}
+}
+
+// scanYarnPnPRoot is dispatched when scanDir encounters a .yarn directory.
+// Yarn Berry's Plug'n'Play layout keeps every dependency as a zip archive
+// inside .yarn/cache/, with a deterministic filename that encodes the
+// canonical package name and version.
+func (s *scanner) scanYarnPnPRoot(yarnDir string) {
+	cacheDir := filepath.Join(yarnDir, "cache")
+	info, err := os.Lstat(cacheDir)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return
+	}
+	s.scanYarnPnPCache(cacheDir)
+}
+
+// yarnPnPCacheFile matches `.yarn/cache` archive names like:
+//
+//	react-npm-18.0.0-a0b1c2d3.zip
+//	@tanstack-react-router-npm-1.169.5-deadbeef-cafebabe.zip
+//
+// Group 1 is the optional "@scope" segment, group 2 is the package name
+// (which can itself contain hyphens and dots), and group 3 is the semver
+// version. We deliberately restrict the version to strict X.Y.Z — the
+// hash tail looks suspiciously like a semver prerelease and would be
+// greedily absorbed if we allowed one. No tracked incident is on a
+// prerelease release line.
+var yarnPnPCacheFile = regexp.MustCompile(
+	`^(?:(@[^-]+)-)?([a-zA-Z0-9][a-zA-Z0-9._-]*?)-npm-(\d+\.\d+\.\d+)-[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)?\.zip$`,
+)
+
+func (s *scanner) scanYarnPnPCache(cacheDir string) {
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		s.addError(cacheDir, err)
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".zip") {
+			continue
+		}
+		match := yarnPnPCacheFile.FindStringSubmatch(name)
+		if match == nil {
+			continue
+		}
+		scope, pkg, version := match[1], match[2], match[3]
+		canonical := pkg
+		if scope != "" {
+			canonical = scope + "/" + pkg
+		}
+		fullPath := filepath.Join(cacheDir, name)
+		details := fmt.Sprintf("Yarn PnP cache archive name indicates %s@%s is materialized in this project", canonical, version)
+		if !s.recordResolvedUsage("npm", "installed-package", fullPath, canonical, version, "", details) {
+			continue
+		}
+		if !isCompromisedPackageVersion("npm", canonical, version) {
+			continue
+		}
+		s.addFinding(Finding{
+			Severity:  "critical",
+			Category:  "installed-package",
+			Ecosystem: "npm",
+			Package:   canonical,
+			Version:   version,
+			Path:      fullPath,
+			Details:   details,
+		})
 	}
 }
 

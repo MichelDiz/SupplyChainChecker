@@ -20,7 +20,14 @@ It reports two things:
 
 - npm packages — manifests and lockfiles: `package.json`, `package-lock.json`,
   `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`.
-- Installed Node dependencies in `node_modules/`.
+- Installed Node dependencies across multiple linker layouts:
+  - flat `node_modules/<pkg>/` (npm, yarn classic, bun hoisted),
+  - scoped `node_modules/@scope/<pkg>/`,
+  - nested `node_modules/<outer>/node_modules/<inner>/` (non-hoisted),
+  - pnpm isolated `node_modules/.pnpm/<pkg>@<ver>/node_modules/<pkg>/`,
+  - bun isolated `node_modules/.bun/<pkg>@<ver>/node_modules/<pkg>/`,
+  - symlinks pointing to a global store (resolved only for tracked names),
+  - Yarn Berry PnP archives under `.yarn/cache/*.zip` (filename parsing).
 - Python packages — manifests and lockfiles: `requirements*.txt`,
   `constraints.txt`, `pyproject.toml`, `uv.lock`, `poetry.lock`, `Pipfile`,
   `Pipfile.lock`, `setup.py`, `setup.cfg`.

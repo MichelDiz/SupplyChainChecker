@@ -265,6 +265,83 @@ func TestScanDetectsScopedInPnpmStore(t *testing.T) {
 	}
 }
 
+func TestScanDetectsYarnPnPCacheArchive(t *testing.T) {
+	root := t.TempDir()
+
+	// Three cache entries: one tracked scoped, one tracked unscoped, one safe.
+	cacheDir := filepath.Join(root, "app", ".yarn", "cache")
+	writeFile(t, filepath.Join(cacheDir, "@tanstack-react-router-npm-1.169.5-deadbeef-cafebabe.zip"), "synthetic")
+	writeFile(t, filepath.Join(cacheDir, "pgserve-npm-1.1.12-abc12345.zip"), "synthetic")
+	writeFile(t, filepath.Join(cacheDir, "react-npm-18.3.1-fa1afe1.zip"), "synthetic")
+
+	report := Scan(Config{Roots: []string{root}, IncludeIOC: false})
+
+	assertHasFinding(t, report, "@tanstack/react-router", "1.169.5", "installed-package")
+	assertHasFinding(t, report, "pgserve", "1.1.12", "installed-package")
+	// react is not tracked; must not produce any finding or usage.
+	for _, f := range report.Findings {
+		if f.Package == "react" {
+			t.Errorf("unexpected finding for untracked react: %#v", f)
+		}
+	}
+	for _, u := range report.Usages {
+		if u.Package == "react" {
+			t.Errorf("untracked react surfaced as usage: %#v", u)
+		}
+	}
+}
+
+func TestScanDetectsBunIsolatedStore(t *testing.T) {
+	root := t.TempDir()
+
+	// Bun's isolated linker uses node_modules/.bun/<pkg>@<ver>/node_modules/<pkg>
+	storeDir := filepath.Join(root, "app", "node_modules", ".bun", "pgserve@1.1.13")
+	writeFile(t, filepath.Join(storeDir, "node_modules", "pgserve", "package.json"), `{
+  "name": "pgserve",
+  "version": "1.1.13"
+}`)
+
+	report := Scan(Config{Roots: []string{root}, IncludeIOC: false})
+
+	assertHasFinding(t, report, "pgserve", "1.1.13", "installed-package")
+}
+
+func TestScanFollowsSymlinkToGlobalStoreForTrackedPackage(t *testing.T) {
+	root := t.TempDir()
+
+	// Synthetic "global store" outside the project tree: contains a real
+	// package.json for the tracked @mistralai/mistralai@2.2.3 install.
+	storeRoot := filepath.Join(root, "global-store", "files", "ab", "cdef")
+	writeFile(t, filepath.Join(storeRoot, "package.json"), `{
+  "name": "@mistralai/mistralai",
+  "version": "2.2.3"
+}`)
+
+	// Project tree: node_modules/@mistralai/mistralai is a symlink into the
+	// store. Untracked react also symlinked — must NOT be followed.
+	projectModules := filepath.Join(root, "app", "node_modules")
+	if err := os.MkdirAll(filepath.Join(projectModules, "@mistralai"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Symlink(storeRoot, filepath.Join(projectModules, "@mistralai", "mistralai")); err != nil {
+		t.Fatalf("symlink mistralai: %v", err)
+	}
+	reactTarget := filepath.Join(root, "global-store", "files", "ff", "react")
+	writeFile(t, filepath.Join(reactTarget, "package.json"), `{"name":"react","version":"18.3.1"}`)
+	if err := os.Symlink(reactTarget, filepath.Join(projectModules, "react")); err != nil {
+		t.Fatalf("symlink react: %v", err)
+	}
+
+	report := Scan(Config{Roots: []string{filepath.Join(root, "app")}, IncludeIOC: false})
+
+	assertHasFinding(t, report, "@mistralai/mistralai", "2.2.3", "installed-package")
+	for _, u := range report.Usages {
+		if u.Package == "react" {
+			t.Errorf("untracked react symlink was followed: %#v", u)
+		}
+	}
+}
+
 func TestPnpmTokenBoundaryRejectsExtendedVersion(t *testing.T) {
 	// Version "1.169.5" must NOT match a future "1.169.55".
 	if _, _, ok := matchPackageVersionToken("npm", "@tanstack+react-router@1.169.55_react@18.3.1"); ok {
