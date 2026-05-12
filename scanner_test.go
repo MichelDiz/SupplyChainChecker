@@ -185,6 +185,98 @@ repo/private
 	assertHasFinding(t, report, "axios", "0.30.4", "lockfile")
 }
 
+func TestScanDetectsScopedInstalledPackage(t *testing.T) {
+	root := t.TempDir()
+
+	writeFile(t, filepath.Join(root, "app", "node_modules", "@tanstack", "react-router", "package.json"), `{
+  "name": "@tanstack/react-router",
+  "version": "1.169.5"
+}`)
+	writeFile(t, filepath.Join(root, "app", "node_modules", "@cap-js", "sqlite", "package.json"), `{
+  "name": "@cap-js/sqlite",
+  "version": "2.2.2"
+}`)
+
+	report := Scan(Config{Roots: []string{root}, IncludeIOC: false})
+
+	assertHasFinding(t, report, "@tanstack/react-router", "1.169.5", "installed-package")
+	assertHasFinding(t, report, "@cap-js/sqlite", "2.2.2", "installed-package")
+}
+
+func TestScanDetectsNestedNodeModulesInstall(t *testing.T) {
+	root := t.TempDir()
+
+	// Outer dep (untracked) with a tracked dep nested inside its own
+	// node_modules. Real-world example: a build tool pinning an old
+	// vulnerable transitive that npm/yarn could not hoist.
+	writeFile(t, filepath.Join(root, "app", "node_modules", "outer-pkg", "package.json"), `{
+  "name": "outer-pkg",
+  "version": "9.9.9"
+}`)
+	writeFile(t, filepath.Join(root, "app", "node_modules", "outer-pkg", "node_modules", "@mistralai", "mistralai", "package.json"), `{
+  "name": "@mistralai/mistralai",
+  "version": "2.2.3"
+}`)
+	writeFile(t, filepath.Join(root, "app", "node_modules", "outer-pkg", "node_modules", "pgserve", "package.json"), `{
+  "name": "pgserve",
+  "version": "1.1.12"
+}`)
+
+	report := Scan(Config{Roots: []string{root}, IncludeIOC: false})
+
+	assertHasFinding(t, report, "@mistralai/mistralai", "2.2.3", "installed-package")
+	assertHasFinding(t, report, "pgserve", "1.1.12", "installed-package")
+}
+
+func TestScanDetectsScopedInPnpmStore(t *testing.T) {
+	root := t.TempDir()
+
+	// pnpm flattens scoped packages with "+" in the store directory name.
+	storeDir := filepath.Join(root, "app", "node_modules", ".pnpm", "@tanstack+react-router@1.169.5_react@18.3.1")
+	writeFile(t, filepath.Join(storeDir, "node_modules", "@tanstack", "react-router", "package.json"), `{
+  "name": "@tanstack/react-router",
+  "version": "1.169.5"
+}`)
+
+	report := Scan(Config{Roots: []string{root}, IncludeIOC: false})
+
+	// Expect both signals: the store-dir-name finding AND the deep install finding.
+	assertHasFinding(t, report, "@tanstack/react-router", "1.169.5", "installed-package")
+
+	// The deep install finding's path is the package.json under the store entry.
+	gotInstall := false
+	gotStoreDir := false
+	for _, f := range report.Findings {
+		if f.Package != "@tanstack/react-router" || f.Version != "1.169.5" {
+			continue
+		}
+		if strings.Contains(f.Path, "package.json") {
+			gotInstall = true
+		}
+		if strings.HasSuffix(f.Path, "@tanstack+react-router@1.169.5_react@18.3.1") {
+			gotStoreDir = true
+		}
+	}
+	if !gotInstall {
+		t.Fatalf("expected installed-package finding pointing at package.json under .pnpm store; got %#v", report.Findings)
+	}
+	if !gotStoreDir {
+		t.Fatalf("expected separate finding for the .pnpm store directory name itself; got %#v", report.Findings)
+	}
+}
+
+func TestPnpmTokenBoundaryRejectsExtendedVersion(t *testing.T) {
+	// Version "1.169.5" must NOT match a future "1.169.55".
+	if _, _, ok := matchPackageVersionToken("npm", "@tanstack+react-router@1.169.55_react@18.3.1"); ok {
+		t.Fatal("matchPackageVersionToken should not match 1.169.5 inside 1.169.55")
+	}
+	// Sanity: exact "1.169.5" still matches.
+	pkg, ver, ok := matchPackageVersionToken("npm", "@tanstack+react-router@1.169.5_react@18.3.1")
+	if !ok || pkg != "@tanstack/react-router" || ver != "1.169.5" {
+		t.Fatalf("expected (@tanstack/react-router, 1.169.5, true), got (%q, %q, %v)", pkg, ver, ok)
+	}
+}
+
 func TestScanReportsSafeTrackedUsage(t *testing.T) {
 	root := t.TempDir()
 

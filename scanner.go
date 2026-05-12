@@ -688,24 +688,61 @@ func (s *scanner) scanNodeModules(root string) {
 	}
 
 	for _, entry := range entries {
-		fullPath := filepath.Join(root, entry.Name())
 		if entry.Type()&os.ModeSymlink != 0 {
 			continue
 		}
-
 		if !entry.IsDir() {
 			continue
 		}
+		name := entry.Name()
+		fullPath := filepath.Join(root, name)
 
-		switch entry.Name() {
-		case "axios", "plain-crypto-js":
-			s.scanNPMInstalledPackage(filepath.Join(fullPath, "package.json"))
-		case ".pnpm":
+		switch {
+		case name == ".pnpm":
 			s.scanPnpmStore(fullPath)
-		case "@types":
-			continue
+		case name == "@types":
+			// no-op
+		case strings.HasPrefix(name, "@"):
+			s.scanNodeModulesScopeDir(fullPath, name)
+		default:
+			s.processInstalledPackageDir(fullPath, name)
 		}
 	}
+}
+
+func (s *scanner) scanNodeModulesScopeDir(scopeDir, scope string) {
+	entries, err := os.ReadDir(scopeDir)
+	if err != nil {
+		s.addError(scopeDir, err)
+		return
+	}
+	for _, entry := range entries {
+		if entry.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		if !entry.IsDir() {
+			continue
+		}
+		fullPath := filepath.Join(scopeDir, entry.Name())
+		s.processInstalledPackageDir(fullPath, scope+"/"+entry.Name())
+	}
+}
+
+// processInstalledPackageDir handles one <node_modules>/<pkg> dir: it reads
+// the package manifest only when the directory name matches a tracked
+// incident (cheap pre-check), and always recurses into a nested
+// node_modules/ if one is present, since npm/yarn can pin different
+// versions of a tracked dep deeper in the tree.
+func (s *scanner) processInstalledPackageDir(pkgDir, pkgName string) {
+	if _, ok := incidentForPackage("npm", pkgName); ok {
+		s.scanNPMInstalledPackage(filepath.Join(pkgDir, "package.json"))
+	}
+	nested := filepath.Join(pkgDir, "node_modules")
+	info, err := os.Lstat(nested)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return
+	}
+	s.scanNodeModules(nested)
 }
 
 func (s *scanner) scanPnpmStore(root string) {
@@ -731,10 +768,12 @@ func (s *scanner) scanPnpmStore(root string) {
 				Details:   fmt.Sprintf("pnpm store directory name indicates %s@%s is installed", packageName, version),
 			})
 		}
-
-		for _, packageName := range []string{"axios", "plain-crypto-js"} {
-			s.scanNPMInstalledPackage(filepath.Join(fullPath, "node_modules", packageName, "package.json"))
+		nested := filepath.Join(fullPath, "node_modules")
+		info, err := os.Lstat(nested)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			continue
 		}
+		s.scanNodeModules(nested)
 	}
 }
 
@@ -1234,14 +1273,63 @@ func yarnSelectorPackageName(selector string) string {
 
 func matchPackageVersionToken(ecosystem, name string) (string, string, bool) {
 	for _, incident := range incidentsForEcosystem(ecosystem) {
+		canonical := incident.Package
+		candidates := []string{canonical}
+		if ecosystem == "npm" && strings.HasPrefix(canonical, "@") && strings.Contains(canonical, "/") {
+			candidates = append(candidates, strings.Replace(canonical, "/", "+", 1))
+		}
 		for _, version := range incident.Versions {
-			packageName := incident.Package
-			if strings.Contains(name, packageName+"@"+version) {
-				return packageName, version, true
+			for _, candidate := range candidates {
+				if isPackageVersionToken(name, candidate, version) {
+					return canonical, version, true
+				}
 			}
 		}
 	}
 	return "", "", false
+}
+
+// isPackageVersionToken reports whether name contains "<candidate>@<version>"
+// at a boundary that cannot be confused with a longer version or a different
+// package. pnpm store entries always START with "<pkg>@<ver>" and may continue
+// with "_<peer>" or "(<peer>)" or end. Other contexts may embed the token
+// after a path separator. Without a right-side boundary check, version
+// "1.169.5" would falsely match a future "1.169.55".
+func isPackageVersionToken(name, candidate, version string) bool {
+	token := candidate + "@" + version
+	for searchFrom := 0; searchFrom <= len(name); {
+		idx := strings.Index(name[searchFrom:], token)
+		if idx < 0 {
+			return false
+		}
+		start := searchFrom + idx
+		end := start + len(token)
+		leftOK := start == 0 || isPackageBoundary(name[start-1])
+		rightOK := end == len(name) || isVersionBoundary(name[end])
+		if leftOK && rightOK {
+			return true
+		}
+		searchFrom = start + 1
+	}
+	return false
+}
+
+func isPackageBoundary(c byte) bool {
+	switch c {
+	case '/', '+', '_', '(', ')', ' ', '\t':
+		return true
+	}
+	return false
+}
+
+func isVersionBoundary(c byte) bool {
+	if c >= '0' && c <= '9' {
+		return false
+	}
+	if c == '.' {
+		return false
+	}
+	return true
 }
 
 func (s *scanner) projectPathFor(path string) string {
