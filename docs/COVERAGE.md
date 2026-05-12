@@ -22,6 +22,10 @@ Status legend:
 | `@cap-js/db-service` | `2.10.1` | Mini Shai-Hulud (SAP cap-js) campaign | <https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm> | active |
 | `mbt` | `1.2.48` | Mini Shai-Hulud (SAP build tools) campaign | <https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm> | active |
 | `intercom-client` | `7.0.5` | Trojanized release in TeamPCP / Mini Shai-Hulud wave | <https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm> | needs-verification |
+| `@tanstack/*` (42 packages, 84 versions — see `incidents.go`) | per-package, e.g. `@tanstack/react-router` `1.169.5`/`1.169.8` | Mini Shai-Hulud TanStack wave (2026-05-11) — GitHub Actions cache poisoning, `router_init.js` payload, self-propagating | <https://tanstack.com/blog/npm-supply-chain-compromise-postmortem> / GHSA-g7cv-rxg3-hmpx | active |
+| `@mistralai/mistralai` | `2.2.2`, `2.2.3`, `2.2.4` | Same TanStack wave (peer compromise) | <https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised> | active |
+| `@mistralai/mistralai-azure` | `1.7.1`, `1.7.2`, `1.7.3` | Same TanStack wave (peer compromise) | <https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised> | active |
+| `@mistralai/mistralai-gcp` | `1.7.1`, `1.7.2`, `1.7.3` | Same TanStack wave (peer compromise) | <https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised> | active |
 
 ## PyPI
 

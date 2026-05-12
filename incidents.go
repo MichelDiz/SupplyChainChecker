@@ -108,8 +108,66 @@ var (
 			Versions:  []string{"7.0.5"},
 			Summary:   "Trojanized npm release reported in the same TeamPCP/Mini Shai-Hulud wave; public analysis was still in progress when added.",
 		},
+		// --- Mini Shai-Hulud TanStack wave (2026-05-11) ---
+		// 84 versions across 42 @tanstack/* packages, published 19:20-19:26 UTC
+		// via GitHub Actions cache poisoning of TanStack/router (PR #7378). Each
+		// release ships a ~2.3 MB router_init.js that harvests dev/cloud/CI
+		// secrets and self-propagates through packages maintained by the victim.
+		// Source: GHSA-g7cv-rxg3-hmpx + https://tanstack.com/blog/npm-supply-chain-compromise-postmortem
+		{Ecosystem: "npm", Package: "@tanstack/arktype-adapter", Versions: []string{"1.166.12", "1.166.15"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/eslint-plugin-router", Versions: []string{"1.161.9", "1.161.12"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/eslint-plugin-start", Versions: []string{"0.0.4", "0.0.7"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/history", Versions: []string{"1.161.9", "1.161.12"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/nitro-v2-vite-plugin", Versions: []string{"1.154.12", "1.154.15"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/react-router", Versions: []string{"1.169.5", "1.169.8"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/react-router-devtools", Versions: []string{"1.166.16", "1.166.19"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/react-router-ssr-query", Versions: []string{"1.166.15", "1.166.18"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/react-start", Versions: []string{"1.167.68", "1.167.71"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/react-start-client", Versions: []string{"1.166.51", "1.166.54"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/react-start-rsc", Versions: []string{"0.0.47", "0.0.50"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/react-start-server", Versions: []string{"1.166.55", "1.166.58"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/router-cli", Versions: []string{"1.166.46", "1.166.49"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/router-core", Versions: []string{"1.169.5", "1.169.8"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/router-devtools", Versions: []string{"1.166.16", "1.166.19"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/router-devtools-core", Versions: []string{"1.167.6", "1.167.9"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/router-generator", Versions: []string{"1.166.45", "1.166.48"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/router-plugin", Versions: []string{"1.167.38", "1.167.41"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/router-ssr-query-core", Versions: []string{"1.168.3", "1.168.6"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/router-utils", Versions: []string{"1.161.11", "1.161.14"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/router-vite-plugin", Versions: []string{"1.166.53", "1.166.56"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/solid-router", Versions: []string{"1.169.5", "1.169.8"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/solid-router-devtools", Versions: []string{"1.166.16", "1.166.19"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/solid-router-ssr-query", Versions: []string{"1.166.15", "1.166.18"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/solid-start", Versions: []string{"1.167.65", "1.167.68"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/solid-start-client", Versions: []string{"1.166.50", "1.166.53"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/solid-start-server", Versions: []string{"1.166.54", "1.166.57"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/start-client-core", Versions: []string{"1.168.5", "1.168.8"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/start-fn-stubs", Versions: []string{"1.161.9", "1.161.12"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/start-plugin-core", Versions: []string{"1.169.23", "1.169.26"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/start-server-core", Versions: []string{"1.167.33", "1.167.36"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/start-static-server-functions", Versions: []string{"1.166.44", "1.166.47"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/start-storage-context", Versions: []string{"1.166.38", "1.166.41"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/valibot-adapter", Versions: []string{"1.166.12", "1.166.15"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/virtual-file-routes", Versions: []string{"1.161.10", "1.161.13"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/vue-router", Versions: []string{"1.169.5", "1.169.8"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/vue-router-devtools", Versions: []string{"1.166.16", "1.166.19"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/vue-router-ssr-query", Versions: []string{"1.166.15", "1.166.18"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/vue-start", Versions: []string{"1.167.61", "1.167.64"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/vue-start-client", Versions: []string{"1.166.46", "1.166.49"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/vue-start-server", Versions: []string{"1.166.50", "1.166.53"}, Summary: tanstackMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@tanstack/zod-adapter", Versions: []string{"1.166.12", "1.166.15"}, Summary: tanstackMiniShaiHuludSummary},
+		// Peer compromise in the same wave: Mistral AI SDKs published 2026-05-11.
+		// Same router_init.js-style payload. Source: Wiz, Aikido, Safedep.
+		{Ecosystem: "npm", Package: "@mistralai/mistralai", Versions: []string{"2.2.2", "2.2.3", "2.2.4"}, Summary: mistralMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@mistralai/mistralai-azure", Versions: []string{"1.7.1", "1.7.2", "1.7.3"}, Summary: mistralMiniShaiHuludSummary},
+		{Ecosystem: "npm", Package: "@mistralai/mistralai-gcp", Versions: []string{"1.7.1", "1.7.2", "1.7.3"}, Summary: mistralMiniShaiHuludSummary},
 	}
 	incidentIndex = buildIncidentIndex(knownIncidents)
+)
+
+const (
+	tanstackMiniShaiHuludSummary = "Mini Shai-Hulud (TanStack) campaign release published 2026-05-11 via GitHub Actions cache poisoning. Drops router_init.js (~2.3 MB) on install; harvests developer, cloud, and CI/CD secrets and self-propagates to other npm packages owned by the victim. Treat affected environments as compromised and rotate npm/cloud/CI credentials."
+	mistralMiniShaiHuludSummary  = "Mini Shai-Hulud compromised release in the same TanStack wave (2026-05-11). Same router_init.js-style payload targeting developer/cloud/CI secrets. Rotate Mistral API keys, npm tokens, and cloud credentials."
 )
 
 func buildIncidentIndex(incidents []packageIncident) map[string]indexedIncident {
