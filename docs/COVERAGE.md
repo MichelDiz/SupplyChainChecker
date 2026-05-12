@@ -21,11 +21,22 @@ Status legend:
 | `@cap-js/postgres` | `2.2.2` | Mini Shai-Hulud (SAP cap-js) campaign | <https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm> | active |
 | `@cap-js/db-service` | `2.10.1` | Mini Shai-Hulud (SAP cap-js) campaign | <https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm> | active |
 | `mbt` | `1.2.48` | Mini Shai-Hulud (SAP build tools) campaign | <https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm> | active |
-| `intercom-client` | `7.0.5` | Trojanized release in TeamPCP / Mini Shai-Hulud wave | <https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm> | needs-verification |
+| `intercom-client` | `7.0.4`, `7.0.5` | Trojanized release in TeamPCP / Mini Shai-Hulud wave | <https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised> | active |
 | `@tanstack/*` (42 packages, 84 versions — see `incidents.go`) | per-package, e.g. `@tanstack/react-router` `1.169.5`/`1.169.8` | Mini Shai-Hulud TanStack wave (2026-05-11) — GitHub Actions cache poisoning, `router_init.js` payload, self-propagating | <https://tanstack.com/blog/npm-supply-chain-compromise-postmortem> / GHSA-g7cv-rxg3-hmpx | active |
 | `@mistralai/mistralai` | `2.2.2`, `2.2.3`, `2.2.4` | Same TanStack wave (peer compromise) | <https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised> | active |
 | `@mistralai/mistralai-azure` | `1.7.1`, `1.7.2`, `1.7.3` | Same TanStack wave (peer compromise) | <https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised> | active |
 | `@mistralai/mistralai-gcp` | `1.7.1`, `1.7.2`, `1.7.3` | Same TanStack wave (peer compromise) | <https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised> | active |
+| `@opensearch-project/opensearch` | `3.5.3`, `3.6.2`, `3.7.0`, `3.8.0` | Same TanStack wave — ~1.3M weekly downloads | <https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised> | active |
+| `@uipath/*` (65 packages — see `incidents.go`) | per-package, mostly single version (e.g. `@uipath/agent-sdk` `1.0.2`) | Same TanStack wave (UiPath automation tooling) | <https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised> | active |
+| `@squawk/*` (22 packages × 5 versions — see `incidents.go`) | per-package version ranges | Same TanStack wave (aviation data libs) | <https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised> | active |
+| `@tallyui/*` (10 packages × 3 versions — see `incidents.go`) | per-package version ranges | Same TanStack wave (commerce connectors) | <https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised> | active |
+| `@beproduct/nestjs-auth` | `0.1.2` … `0.1.19` (18 versions) | Same TanStack wave | <https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised> | active |
+| `@dirigible-ai/sdk` | `0.6.2`, `0.6.3` | Same TanStack wave | <https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised> | active |
+| `@draftauth/client`, `@draftauth/core`, `@draftlab/auth`, `@draftlab/auth-router`, `@draftlab/db` | per-package | Same TanStack wave (auth/DB) | <https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised> | active |
+| `@mesadev/rest`, `@mesadev/saguaro`, `@mesadev/sdk` | per-package | Same TanStack wave | <https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised> | active |
+| `@ml-toolkit-ts/preprocessing`, `@ml-toolkit-ts/xgboost`, `ml-toolkit-ts` | per-package | Same TanStack wave (ML tooling) | <https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised> | active |
+| `@supersurkhet/cli`, `@supersurkhet/sdk`, `@taskflow-corp/cli`, `@tolka/cli` | per-package | Same TanStack wave | <https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised> | active |
+| `agentwork-cli`, `cmux-agent-mcp`, `cross-stitch`, `git-branch-selector`, `git-git-git`, `nextmove-mcp`, `safe-action`, `ts-dna`, `wot-api` | per-package | Same TanStack wave (unscoped peers) | <https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised> | active |
 
 ## PyPI
 
@@ -36,6 +47,8 @@ Status legend:
 | `xinference` | `2.6.0`, `2.6.1`, `2.6.2` | Compromised PyPI releases with install/runtime payload | <https://orca.security/resources/blog/xinference-pypi-package-compromise-remediation/> | active |
 | `elementary-data` | `0.23.3` | CI/CD-injected malicious release; cloud + dbt + SSH credential theft | <https://snyk.io/blog/malicious-release-of-elementary-data-pypi-package-steals-cloud-credentials-from-data-engineers/> | active |
 | `lightning` | `2.6.2`, `2.6.3` | Hidden `_runtime` downloader; obfuscated credential stealer | <https://socket.dev/blog/lightning-pypi-package-compromised> | active |
+| `mistralai` | `2.4.6` | PyPI side of the Mini Shai-Hulud TanStack wave (first cross-registry hit) | <https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised> | active |
+| `guardrails-ai` | `0.10.1` | Same TanStack wave (PyPI peer) | <https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised> | active |
 
 ## GitHub Actions (planned)
 
